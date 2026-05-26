@@ -150,7 +150,7 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
               <input 
                 type="text" 
                 required
-                placeholder="Ex: Yuri Rodrigues" 
+                placeholder="José da Silva" 
                 value={nome}
                 onChange={(e) => setNome(e.target.value)}
                 className={`w-full border rounded-xl px-3 py-2.5 text-xs focus:outline-none transition-colors ${estiloInput}`}
