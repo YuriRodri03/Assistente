@@ -4,7 +4,9 @@ import ReactDOM from 'react-dom/client';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import { supabase } from './supabaseClient';
-import './index.css'; // Garante que os estilos do Tailwind sejam carregados
+import './index.css'; 
+import { registerSW } from 'virtual:pwa-register'
+registerSW({ immediate: true })
 
 function Main() {
   const [sessionUser, setSessionUser] = useState(null);
