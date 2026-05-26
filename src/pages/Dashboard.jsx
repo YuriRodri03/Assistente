@@ -354,7 +354,7 @@ const handleAdicionarNota = async (e) => {
         {/* ABAS */}
         <div className="flex border-b mb-4 gap-2" style={{ borderColor: tema === 'dark' ? '#27272a' : '#e2e8f0' }}>
           <button onClick={() => setAbaAtiva('lista')} className={`py-2 px-4 text-xs font-bold uppercase tracking-wider border-b-2 cursor-pointer ${abaAtiva === 'lista' ? 'border-violet-500 text-violet-500 font-extrabold' : 'border-transparent text-slate-500'}`}>📋 Quadro de Tarefas</button>
-          <button onClick={() => setAbaAtiva('agenda')} className={`py-2 px-4 text-xs font-bold uppercase tracking-wider border-b-2 cursor-pointer ${abaAtiva === 'agenda' ? 'border-violet-500 text-violet-500 font-extrabold' : 'border-transparent text-slate-500'}`}>⏳ Google Agenda Mode</button>
+          <button onClick={() => setAbaAtiva('agenda')} className={`py-2 px-4 text-xs font-bold uppercase tracking-wider border-b-2 cursor-pointer ${abaAtiva === 'agenda' ? 'border-violet-500 text-violet-500 font-extrabold' : 'border-transparent text-slate-500'}`}>⏳ Modo Agenda</button>
         </div>
 
         {abaAtiva === 'lista' ? (
