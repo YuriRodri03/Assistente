@@ -4,7 +4,7 @@ import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianG
 // Importando o cliente conectado do Supabase
 import { supabase } from '../supabaseClient';
 
-export default function Dashboard() {
+export default function Dashboard({ user, onLogout }) {
   // --- CONTROLES DE INTERFACE ---
   const [painelAberto, setPainelAberto] = useState(false);
   const [abaAtiva, setAbaAtiva] = useState('lista'); 
@@ -43,16 +43,17 @@ export default function Dashboard() {
   const [novaNota, setNovaNota] = useState('');
   const [tarefaIdAdiar, setTarefaIdAdiar] = useState(null);
 
-  // --- 🔄 BUSCAR DADOS DO SUPABASE (Sincronização Inicial) ---
+  // --- 🔄 BUSCAR DADOS DO SUPABASE (Filtrado por Usuário Logado) ---
   const buscarDadosDoSupabase = async () => {
     try {
-      const { data: dataTarefas } = await supabase.from('tarefas').select('*');
+      // Filtra trazendo apenas as tarefas do usuário conectado
+      const { data: dataTarefas } = await supabase.from('tarefas').select('*').eq('user_id', user.id);
       if (dataTarefas) setTarefas(dataTarefas);
 
-      const { data: dataNotas } = await supabase.from('notas').select('*');
+      const { data: dataNotas } = await supabase.from('notas').select('*').eq('user_id', user.id);
       if (dataNotas) setNotas(dataNotas);
 
-      const { data: dataMetricas } = await supabase.from('historico_metricas').select('*');
+      const { data: dataMetricas } = await supabase.from('historico_metricas').select('*').eq('user_id', user.id);
       if (dataMetricas) {
         const mapeado = {};
         dataMetricas.forEach(row => { mapeado[row.data] = row.valores; });
@@ -64,8 +65,10 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    buscarDadosDoSupabase();
-  }, []);
+    if (user?.id) {
+      buscarDadosDoSupabase();
+    }
+  }, [user]);
 
   // --- AUXILIARES DE MÉTRICAS ---
   const metricasDoDia = historicoMetricas[dataSelecionada] || {};
@@ -77,9 +80,11 @@ export default function Dashboard() {
 
     setHistoricoMetricas({ ...historicoMetricas, [dataSelecionada]: novosValoresDoDia });
 
+    // Salva vinculando explicitamente ao id da conta ativa
     await supabase.from('historico_metricas').upsert({
       data: dataSelecionada,
-      valores: novosValoresDoDia
+      valores: novosValoresDoDia,
+      user_id: user.id
     });
   };
 
@@ -112,7 +117,8 @@ export default function Dashboard() {
       hora_inicio: tipoTempoTarefa === 'horario' ? horaInicio : '',
       hora_fim: tipoTempoTarefa === 'horario' ? horaFim : '',
       prioridade: prioridadeTarefa,
-      status: 'pendente'
+      status: 'pendente',
+      user_id: user.id // Salva na linha do usuário
     };
 
     const { data } = await supabase.from('tarefas').insert([novaTarefaObj]).select();
@@ -141,14 +147,16 @@ export default function Dashboard() {
   };
 
   // --- ✍️ OPERAÇÕES DE NOTAS ---
-  const handleAdicionarNota = async (e) => {
-    e.preventDefault();
-    if (!novaNota.trim()) return;
+const handleAdicionarNota = async (e) => {
+  e.preventDefault();
+  if (!novaNota.trim()) return;
 
-    const { data } = await supabase.from('notes' || 'notas').insert([{ conteudo: novaNota }]).select();
-    if (data) setNotas([...notas, data[0]]);
-    novaNota('');
-  };
+  // Corrigido o fechamento da chave do objeto antes do colchete
+  const { data } = await supabase.from('notas').insert([{ conteudo: novaNota, user_id: user.id }]).select();
+  
+  if (data) setNotas([...notas, data[0]]);
+  setNovaNota('');
+};
 
   const deletarNota = async (id) => {
     setNotas(notas.filter(n => n.id !== id));
@@ -190,7 +198,6 @@ export default function Dashboard() {
   const tarefasDeHojeComHora = tarefasDeHoje.filter(t => t.tipo === 'horario').sort((a,b) => a.hora_inicio.localeCompare(b.hora_inicio));
   const tarefasDeHojeLivres = tarefasDeHoje.filter(t => t.tipo === 'livre');
   
-  // Traz prioridade ALTA para o topo na barra lateral
   const tarefasFuturas = tarefas.filter(t => t.data > dataSelecionada).sort((a, b) => {
     if (a.prioridade === 'alta' && b.prioridade !== 'alta') return -1;
     if (a.prioridade !== 'alta' && b.prioridade === 'alta') return 1;
@@ -252,11 +259,11 @@ export default function Dashboard() {
         <header className={`mb-6 border-b pb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 ${tema === 'dark' ? 'border-zinc-800' : 'border-slate-200'}`}>
           <div>
             <h1 className={`text-2xl font-extrabold tracking-tight flex items-center gap-2 ${estiloTextoPrincipal}`}>🤖 Central do Assistente</h1>
-            <p className={`${estiloTextoSecundario} text-xs mt-0.5`}>Painel de rotina em nuvem com precisão horária e mensal.</p>
+            <p className={`${estiloTextoSecundario} text-xs mt-0.5`}>Usuário ativo: <span className="text-violet-500 font-bold">{user?.email}</span></p>
           </div>
           
           <div className="flex items-center flex-wrap gap-2">
-            {/* INTERRUPTOR DE ALERTAS CORRIGIDO */}
+            {/* INTERRUPTOR DE ALERTAS */}
             <button
               onClick={() => { if (permissaoNotificacao !== 'granted') solicitarPermissaoNotificacao(); else setAlertasLigados(!alertasLigados); }}
               className={`text-xs px-3 h-[38px] rounded-xl border font-bold transition-all active:scale-95 cursor-pointer ${
@@ -274,7 +281,13 @@ export default function Dashboard() {
               <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Dia Ativo</p>
               <p className="text-xs font-bold text-violet-500 font-mono">{formatarDataExibicao(dataSelecionada)}</p>
             </div>
-            <button onClick={() => setPainelAberto(true)} className="bg-violet-600 hover:bg-violet-500 text-white font-semibold text-xs px-4 h-[38px] rounded-xl cursor-pointer">⚙️ Registrar / Editar</button>
+
+            <button onClick={() => setPainelAberto(true)} className="bg-violet-600 hover:bg-violet-500 text-white font-semibold text-xs px-4 h-[38px] rounded-xl cursor-pointer">⚙️ Registrar</button>
+            
+            {/* BOTÃO DE LOGOUT ADICIONADO */}
+            <button onClick={onLogout} className="bg-zinc-800 border border-zinc-700 text-red-400 hover:bg-red-500/10 font-semibold text-xs px-3 h-[38px] rounded-xl cursor-pointer">
+              🚪 Sair
+            </button>
           </div>
         </header>
 
@@ -316,7 +329,7 @@ export default function Dashboard() {
                   <h4 className={`text-3xl font-black ${estiloTextoPrincipal}`}>28°C</h4>
                   <p className="text-xs text-slate-400">Fortaleza, Ceará</p>
                 </div>
-                <span className="text-5xl filter drop-shadow-sm animate-pulse">☀️</span>
+                <span className="text-5xl filter drop-shadow-md">☀️</span>
               </div>
             </div>
             <div className={`mt-4 pt-3 border-t text-xs text-slate-400 ${tema === 'dark' ? 'border-zinc-800/60' : 'border-slate-100'}`}>
@@ -341,7 +354,7 @@ export default function Dashboard() {
         {/* ABAS */}
         <div className="flex border-b mb-4 gap-2" style={{ borderColor: tema === 'dark' ? '#27272a' : '#e2e8f0' }}>
           <button onClick={() => setAbaAtiva('lista')} className={`py-2 px-4 text-xs font-bold uppercase tracking-wider border-b-2 cursor-pointer ${abaAtiva === 'lista' ? 'border-violet-500 text-violet-500 font-extrabold' : 'border-transparent text-slate-500'}`}>📋 Quadro de Tarefas</button>
-          <button onClick={() => setAbaAtiva('agenda')} className={`py-2 px-4 text-xs font-bold uppercase tracking-wider border-b-2 cursor-pointer ${abaAtiva === 'agenda' ? 'border-violet-500 text-violet-500 font-extrabold' : 'border-transparent text-slate-500'}`}>⏳ Modo Agenda</button>
+          <button onClick={() => setAbaAtiva('agenda')} className={`py-2 px-4 text-xs font-bold uppercase tracking-wider border-b-2 cursor-pointer ${abaAtiva === 'agenda' ? 'border-violet-500 text-violet-500 font-extrabold' : 'border-transparent text-slate-500'}`}>⏳ Google Agenda Mode</button>
         </div>
 
         {abaAtiva === 'lista' ? (
@@ -365,9 +378,9 @@ export default function Dashboard() {
                             {tarefaIdAdiar === t.id ? (
                               <input type="date" onChange={(e) => adiarTarefaParaData(t.id, e.target.value)} className="bg-zinc-950 border border-zinc-800 text-[10px] rounded p-1 text-white" />
                             ) : (
-                              <button onClick={() => setTarefaIdAdiar(t.id)} className={`text-[10px] font-bold px-2 py-1 rounded cursor-pointer ${tema === 'dark' ? 'bg-zinc-800 hover:bg-zinc-700 text-amber-500' : 'bg-slate-200 text-zinc-700'}`}>⏳ Adiar</button>
+                              <button onClick={() => setTarefaIdAdiar(t.id)} className={`text-[10px] font-bold px-2 py-1 rounded cursor-pointer ${tema === 'dark' ? 'bg-zinc-800 text-amber-500' : 'bg-slate-200 text-zinc-700'}`}>⏳ Adiar</button>
                             )}
-                            <button onClick={() => mudarStatusTarefa(t.id, 'cancelada')} className={`text-[10px] font-bold px-1.5 py-1 rounded cursor-pointer ${tema === 'dark' ? 'bg-zinc-800 hover:bg-zinc-700 text-red-400' : 'bg-slate-200 text-red-600'}`}>✕</button>
+                            <button onClick={() => mudarStatusTarefa(t.id, 'cancelada')} className="text-[10px] text-red-500 bg-zinc-500/5 px-1.5 py-1 rounded cursor-pointer">✕</button>
                             <button onClick={() => excluirTarefa(t.id)} className="text-slate-400 hover:text-red-500 p-1 cursor-pointer">🗑️</button>
                           </div>
                         </li>
@@ -390,9 +403,9 @@ export default function Dashboard() {
                             {tarefaIdAdiar === t.id ? (
                               <input type="date" onChange={(e) => adiarTarefaParaData(t.id, e.target.value)} className="bg-zinc-950 border border-zinc-800 text-[10px] rounded p-1 text-white" />
                             ) : (
-                              <button onClick={() => setTarefaIdAdiar(t.id)} className={`text-[10px] font-bold px-2 py-1 rounded cursor-pointer ${tema === 'dark' ? 'bg-zinc-800 hover:bg-zinc-700 text-amber-500' : 'bg-slate-200 text-zinc-700'}`}>⏳ Adiar</button>
+                              <button onClick={() => setTarefaIdAdiar(t.id)} className={`text-[10px] font-bold px-2 py-1 rounded cursor-pointer ${tema === 'dark' ? 'bg-zinc-800 text-amber-500' : 'bg-slate-200 text-zinc-700'}`}>⏳ Adiar</button>
                             )}
-                            <button onClick={() => mudarStatusTarefa(t.id, 'cancelada')} className={`text-[10px] font-bold px-1.5 py-1 rounded cursor-pointer ${tema === 'dark' ? 'bg-zinc-800 hover:bg-zinc-700 text-red-400' : 'bg-slate-200 text-red-600'}`}>✕</button>
+                            <button onClick={() => mudarStatusTarefa(t.id, 'cancelada')} className="text-[10px] text-red-500 bg-zinc-500/5 px-1.5 py-1 rounded cursor-pointer">✕</button>
                             <button onClick={() => excluirTarefa(t.id)} className="text-slate-400 hover:text-red-500 p-1 cursor-pointer">🗑️</button>
                           </div>
                         </li>
@@ -403,7 +416,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* BARRA LATERAL DA AGENDA FUTURA CRÍTICA */}
+            {/* AGENDA FUTURA CRÍTICA */}
             <div className={`border p-5 rounded-2xl ${estiloCard}`}>
               <h2 className="text-sm font-bold text-amber-500 mb-4 uppercase tracking-wider flex items-center justify-between">
                 <span>📅 Agenda Futura</span>
@@ -464,7 +477,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* GRÁFICOS COMPACTADOS */}
+        {/* GRAFICOS */}
         {dadosGrafico.length > 0 && (
           <div className={`border p-5 rounded-2xl mb-6 ${estiloCard}`}>
             <h3 className="text-xs font-bold mb-4 text-slate-400 uppercase tracking-wider">📈 Análise Histórica de Métricas</h3>
@@ -484,7 +497,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* LEMBRETES MURAL */}
+        {/* LEMBRETES */}
         <section className={`border p-5 rounded-2xl ${estiloCard}`}>
           <h2 className="text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider">📌 Mural de Lembretes</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
