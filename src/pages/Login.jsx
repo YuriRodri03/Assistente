@@ -52,7 +52,7 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
         if (!email.trim()) throw new Error('Por favor, digite o seu e-mail.');
 
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: window.location.origin,
+          redirectTo: 'https://assistente-gamma.vercel.app/',
         });
         if (error) throw error;
 
