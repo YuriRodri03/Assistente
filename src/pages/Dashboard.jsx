@@ -46,12 +46,13 @@ export default function Dashboard({ user, onLogout }) {
   // --- 🔄 BUSCAR DADOS DO SUPABASE (Filtrado por Usuário Logado) ---
   const buscarDadosDoSupabase = async () => {
     try {
-      // Filtra trazendo apenas as tarefas do usuário conectado
-      const { data: dataTarefas } = await supabase.from('tarefas').select('*').eq('user_id', user.id);
+      const { data: dataTarefas, error: errT } = await supabase.from('tarefas').select('*').eq('user_id', user.id);
       if (dataTarefas) setTarefas(dataTarefas);
+      if (errT) console.error("Erro tarefas:", errT);
 
-      const { data: dataNotas } = await supabase.from('notas').select('*').eq('user_id', user.id);
+      const { data: dataNotas, error: errN } = await supabase.from('notas').select('*').eq('user_id', user.id);
       if (dataNotas) setNotas(dataNotas);
+      if (errN) console.error("Erro notas:", errN);
 
       const { data: dataMetricas } = await supabase.from('historico_metricas').select('*').eq('user_id', user.id);
       if (dataMetricas) {
@@ -68,7 +69,7 @@ export default function Dashboard({ user, onLogout }) {
     if (user?.id) {
       buscarDadosDoSupabase();
     }
-  }, [user]);
+  }, [user, dataSelecionada]);
 
   // --- AUXILIARES DE MÉTRICAS ---
   const metricasDoDia = historicoMetricas[dataSelecionada] || {};
@@ -80,7 +81,6 @@ export default function Dashboard({ user, onLogout }) {
 
     setHistoricoMetricas({ ...historicoMetricas, [dataSelecionada]: novosValoresDoDia });
 
-    // Salva vinculando explicitamente ao id da conta ativa
     await supabase.from('historico_metricas').upsert({
       data: dataSelecionada,
       valores: novosValoresDoDia,
@@ -105,7 +105,7 @@ export default function Dashboard({ user, onLogout }) {
 
   const removerMetricaConfig = (id) => setConfigMetricas(configMetricas.filter(m => m.id !== id));
 
-  // --- ✍️ OPERAÇÕES DE TAREFAS ---
+  // --- ✍️ OPERAÇÕES DE TAREFAS (REVISADO) ---
   const handleAdicionarTarefa = async (e) => {
     e.preventDefault();
     if (!novaTarefaTitulo.trim()) return;
@@ -118,12 +118,17 @@ export default function Dashboard({ user, onLogout }) {
       hora_fim: tipoTempoTarefa === 'horario' ? horaFim : '',
       prioridade: prioridadeTarefa,
       status: 'pendente',
-      user_id: user.id // Salva na linha do usuário
+      user_id: user.id 
     };
 
-    const { data } = await supabase.from('tarefas').insert([novaTarefaObj]).select();
-    if (data) setTarefas([...tarefas, data[0]]);
-    setNovaTarefaTitulo('');
+    const { data, error } = await supabase.from('tarefas').insert([novaTarefaObj]).select();
+    if (error) {
+      console.error("Erro ao salvar tarefa:", error);
+      alert("Erro ao salvar tarefa: " + error.message);
+    } else if (data) {
+      setTarefas(prev => [...prev, data[0]]);
+      setNovaTarefaTitulo('');
+    }
   };
 
   const mudarStatusTarefa = async (id, novoStatus) => {
@@ -146,24 +151,28 @@ export default function Dashboard({ user, onLogout }) {
     await supabase.from('tarefas').delete().eq('id', id);
   };
 
-  // --- ✍️ OPERAÇÕES DE NOTAS ---
-const handleAdicionarNota = async (e) => {
-  e.preventDefault();
-  if (!novaNota.trim()) return;
+  // --- ✍️ OPERAÇÕES DE NOTAS (CORRIGIDO) ---
+  const handleAdicionarNota = async (e) => {
+    e.preventDefault();
+    if (!novaNota.trim()) return;
 
-  // Corrigido o fechamento da chave do objeto antes do colchete
-  const { data } = await supabase.from('notas').insert([{ conteudo: novaNota, user_id: user.id }]).select();
-  
-  if (data) setNotas([...notas, data[0]]);
-  setNovaNota('');
-};
+    const { data, error } = await supabase.from('notas').insert([{ conteudo: novaNota, user_id: user.id }]).select();
+    
+    if (error) {
+      console.error("Erro ao salvar nota:", error);
+      alert("Erro ao salvar nota: " + error.message);
+    } else if (data) {
+      setNotas(prev => [...prev, data[0]]);
+      setNovaNota(''); // CORRIGIDO: Agora limpa o estado corretamente
+    }
+  };
 
   const deletarNota = async (id) => {
     setNotas(notas.filter(n => n.id !== id));
     await supabase.from('notas').delete().eq('id', id);
   };
 
-  // --- 🔔 SISTEMA DE AGENDAMENTO DE NOTIFICAÇÕES NATIVAS ---
+  // --- 🔔 NOTIFICAÇÕES ---
   useEffect(() => {
     if (permissaoNotificacao !== 'granted' || !alertasLigados) return;
     
@@ -194,8 +203,8 @@ const handleAdicionarNota = async (e) => {
 
   // --- FILTROS DE RENDERIZAÇÃO ---
   const ordemPrioridade = { alta: 1, media: 2, baixa: 3 };
-  const tarefasDeHoje = tarefas.filter(t => t.data === dataSelecionada).sort((a, b) => ordemPrioridade[a.prioridade] - ordemPrioridade[b.prioridade]);
-  const tarefasDeHojeComHora = tarefasDeHoje.filter(t => t.tipo === 'horario').sort((a,b) => a.hora_inicio.localeCompare(b.hora_inicio));
+  const tarefasDeHoje = tarefas.filter(t => t.data === dataSelecionada).sort((a, b) => (ordemPrioridade[a.prioridade] || 2) - (ordemPrioridade[b.prioridade] || 2));
+  const tarefasDeHojeComHora = tarefasDeHoje.filter(t => t.tipo === 'horario').sort((a,b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
   const tarefasDeHojeLivres = tarefasDeHoje.filter(t => t.tipo === 'livre');
   
   const tarefasFuturas = tarefas.filter(t => t.data > dataSelecionada).sort((a, b) => {
@@ -207,21 +216,58 @@ const handleAdicionarNota = async (e) => {
   const horasDoDia = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'];
 
   const formatarDataExibicao = (dataStr) => {
+    if (!dataStr) return '';
     const [ano, mes, dia] = dataStr.split('-');
     const meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
     return `${dia} de ${meses[parseInt(mes) - 1]}, ${ano}`;
   };
 
+  // --- FUNÇÕES AUXILIARES DE ESTILO DE PRIORIDADE (RESTAURADAS) ---
+const obterEstiloPrioridade = (prioridade) => {
+  if (prioridade === 'alta') return 'bg-red-500/10 border-red-500/30 text-red-400 font-bold';
+  if (prioridade === 'media') return 'bg-amber-500/10 border-amber-500/30 text-amber-400';
+  return 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400';
+};
+
+const obterIconePrioridade = (prioridade) => {
+  if (prioridade === 'alta') return '🔥';
+  if (prioridade === 'media') return '⚡';
+  return '🍃';
+};
+
+// --- NAVEGAÇÃO DO CALENDÁRIO ---
+  const mudarMes = (direcao) => {
+    const [ano, mes, dia] = dataSelecionada.split('-').map(Number);
+    const novaData = new Date(ano, mes - 1 + direcao, 1); // Define para o dia 1 do novo mês
+    
+    const novoAno = novaData.getFullYear();
+    const novoMes = String(novaData.getMonth() + 1).padStart(2, '0');
+    const novoDia = String(Math.min(dia, new Date(novoAno, novaData.getMonth() + 1, 0).getDate())).padStart(2, '0');
+    
+    setDataSelecionada(`${novoAno}-${novoMes}-${novoDia}`);
+  };
+
+  const selecionarMesDireto = (novoMesNum) => {
+    const [ano, , dia] = dataSelecionada.split('-');
+    setDataSelecionada(`${ano}-${String(novoMesNum).padStart(2, '0')}-${dia}`);
+  };
+
+  const selecionarAnoDireto = (novoAnoNum) => {
+    const [, mes, dia] = dataSelecionada.split('-');
+    setDataSelecionada(`${novoAnoNum}-${mes}-${dia}`);
+  };
+
   const gerarDiasDoMes = () => {
-    const baseDate = new Date(dataSelecionada + 'T00:00:00');
-    const ano = baseDate.getFullYear();
-    const mes = baseDate.getMonth();
-    const primeiroDiaSemana = new Date(ano, mes, 1).getDay();
-    const totalDiasMes = new Date(ano, mes + 1, 0).getDate();
+    if (!dataSelecionada) return [];
+    const [ano, mes] = dataSelecionada.split('-').map(Number);
+    // mes - 1 porque no JavaScript os meses começam em 0 (Janeiro = 0)
+    const primeiroDiaSemana = new Date(ano, mes - 1, 1).getDay();
+    const totalDiasMes = new Date(ano, mes, 0).getDate();
+    
     const blocos = [];
     for (let i = 0; i < primeiroDiaSemana; i++) blocos.push(null);
     for (let dia = 1; dia <= totalDiasMes; dia++) {
-      blocos.push(`${ano}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`);
+      blocos.push(`${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`);
     }
     return blocos;
   };
@@ -233,15 +279,6 @@ const handleAdicionarNota = async (e) => {
     return ponto;
   });
 
-  const obterEstiloPrioridade = (prioridade) => {
-    if (prioridade === 'alta') return 'bg-red-500/10 border-red-500/30 text-red-400 font-bold';
-    if (prioridade === 'media') return 'bg-amber-500/10 border-amber-500/30 text-amber-400';
-    return 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400';
-  };
-
-  const obterIconePrioridade = (prioridade) => prioridade === 'alta' ? '🔥' : prioridade === 'media' ? '⚡' : '🍃';
-
-  // Dicionário de Estilos Globais Dinâmicos
   const estiloFundoApp = tema === 'dark' ? 'bg-zinc-950 text-slate-100' : 'bg-slate-50 text-zinc-800';
   const estiloCard = tema === 'dark' ? 'bg-zinc-900/50 border-zinc-800' : 'bg-white border-slate-200 shadow-md';
   const estiloCardInterno = tema === 'dark' ? 'bg-zinc-900 border-zinc-800/60' : 'bg-slate-100 border-slate-200';
@@ -252,18 +289,16 @@ const handleAdicionarNota = async (e) => {
   return (
     <div className={`min-h-screen font-sans relative overflow-x-hidden transition-colors duration-300 ${estiloFundoApp}`}>
       
-      {/* CORPO DO DASHBOARD */}
       <div className={`p-6 max-w-6xl mx-auto transition-all duration-300 ${painelAberto ? 'pr-[400px] opacity-40 pointer-events-none lg:opacity-100 lg:pointer-events-auto' : ''}`}>
         
         {/* CABEÇALHO */}
         <header className={`mb-6 border-b pb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 ${tema === 'dark' ? 'border-zinc-800' : 'border-slate-200'}`}>
           <div>
             <h1 className={`text-2xl font-extrabold tracking-tight flex items-center gap-2 ${estiloTextoPrincipal}`}>🤖 Central do Assistente</h1>
-            <p className={`${estiloTextoSecundario} text-xs mt-0.5`}>Usuário ativo: <span className="text-violet-500 font-bold">{user.user_metadata?.display_name}</span></p>
+            <p className={`${estiloTextoSecundario} text-xs mt-0.5`}>Usuário ativo: <span className="text-violet-500 font-bold">{user.user_metadata?.display_name || user.email}</span></p>
           </div>
           
           <div className="flex items-center flex-wrap gap-2">
-            {/* INTERRUPTOR DE ALERTAS */}
             <button
               onClick={() => { if (permissaoNotificacao !== 'granted') solicitarPermissaoNotificacao(); else setAlertasLigados(!alertasLigados); }}
               className={`text-xs px-3 h-[38px] rounded-xl border font-bold transition-all active:scale-95 cursor-pointer ${
@@ -284,7 +319,6 @@ const handleAdicionarNota = async (e) => {
 
             <button onClick={() => setPainelAberto(true)} className="bg-violet-600 hover:bg-violet-500 text-white font-semibold text-xs px-4 h-[38px] rounded-xl cursor-pointer">⚙️ Registrar</button>
             
-            {/* BOTÃO DE LOGOUT ADICIONADO */}
             <button onClick={onLogout} className="bg-zinc-800 border border-zinc-700 text-red-400 hover:bg-red-500/10 font-semibold text-xs px-3 h-[38px] rounded-xl cursor-pointer">
               🚪 Sair
             </button>
@@ -294,7 +328,48 @@ const handleAdicionarNota = async (e) => {
         {/* CALENDÁRIO MENSAL E CLIMA */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           <div className={`border p-5 rounded-2xl lg:col-span-2 ${estiloCard}`}>
-            <h3 className={`text-xs font-extrabold uppercase tracking-wider mb-3 ${estiloTextoSecundario}`}>📅 Visão Mensal Interativa</h3>
+            <h3 className={`text-xs font-extrabold uppercase tracking-wider mb-3 ${estiloTextoSecundario}`}>📅 Visão Mensal</h3>
+            {/* CABEÇALHO DO CALENDÁRIO COM NAVEGAÇÃO */}
+<div className="flex items-center justify-between mb-4 gap-2">
+  <button 
+    onClick={() => mudarMes(-1)}
+    className={`p-2 rounded-lg border ${tema === 'dark' ? 'border-zinc-800 hover:bg-zinc-800' : 'border-slate-200 hover:bg-slate-100'}`}
+  >
+    ◀
+  </button>
+
+  <div className="flex gap-2">
+    {/* Seletor de Mês */}
+    <select
+      value={parseInt(dataSelecionada.split('-')[1])}
+      onChange={(e) => selecionarMesDireto(Number(e.target.value))}
+      className={`p-1.5 rounded-lg border font-semibold text-sm ${estiloInput}`}
+    >
+      {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((m, idx) => (
+        <option key={m} value={idx + 1}>{m}</option>
+      ))}
+    </select>
+
+    {/* Seletor de Ano */}
+    <select
+      value={parseInt(dataSelecionada.split('-')[0])}
+      onChange={(e) => selecionarAnoDireto(Number(e.target.value))}
+      className={`p-1.5 rounded-lg border font-semibold text-sm ${estiloInput}`}
+    >
+      {/* Gera uma lista de anos: 5 anos para trás e 5 para frente */}
+      {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - 5 + i).map(ano => (
+        <option key={ano} value={ano}>{ano}</option>
+      ))}
+    </select>
+  </div>
+
+  <button 
+    onClick={() => mudarMes(1)}
+    className={`p-2 rounded-lg border ${tema === 'dark' ? 'border-zinc-800 hover:bg-zinc-800' : 'border-slate-200 hover:bg-slate-100'}`}
+  >
+    ▶
+  </button>
+</div>
             <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-500 mb-2">
               <span>DOM</span><span>SEG</span><span>TER</span><span>QUA</span><span>QUI</span><span>SEX</span><span>SÁB</span>
             </div>
@@ -416,7 +491,7 @@ const handleAdicionarNota = async (e) => {
               </div>
             </div>
 
-            {/* AGENDA FUTURA CRÍTICA */}
+            {/* AGENDA FUTURA */}
             <div className={`border p-5 rounded-2xl ${estiloCard}`}>
               <h2 className="text-sm font-bold text-amber-500 mb-4 uppercase tracking-wider flex items-center justify-between">
                 <span>📅 Agenda Futura</span>
@@ -443,7 +518,7 @@ const handleAdicionarNota = async (e) => {
             </div>
           </div>
         ) : (
-          /* ABA GOOGLE AGENDA */
+          /* ABA MODO AGENDA */
           <div className={`border p-5 rounded-2xl shadow-sm mb-6 ${estiloCard}`}>
             {tarefasDeHojeLivres.length > 0 && (
               <div className="mb-4 pb-4 border-b border-zinc-800/40">
@@ -497,7 +572,7 @@ const handleAdicionarNota = async (e) => {
           </div>
         )}
 
-        {/* LEMBRETES */}
+        {/* MURAL */}
         <section className={`border p-5 rounded-2xl ${estiloCard}`}>
           <h2 className="text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider">📌 Mural de Lembretes</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -512,7 +587,7 @@ const handleAdicionarNota = async (e) => {
 
       </div>
 
-      {/* --- GAVETA LATERAL DE EDIÇÃO (CORRIGIDA E COMPLETA) --- */}
+      {/* --- GAVETA LATERAL DE EDIÇÃO --- */}
       <div className={`fixed top-0 right-0 h-full w-[380px] max-w-full border-l shadow-2xl p-6 transform transition-transform duration-300 ease-in-out z-50 flex flex-col justify-between overflow-y-auto ${painelAberto ? 'translate-x-0' : 'translate-x-full'} ${tema === 'dark' ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200'}`}>
         <div className="w-full min-w-0 space-y-6">
           
@@ -524,7 +599,7 @@ const handleAdicionarNota = async (e) => {
             <button onClick={() => setPainelAberto(false)} className={`text-xs px-2 py-1 rounded cursor-pointer ${tema === 'dark' ? 'bg-zinc-800 text-slate-400 hover:text-white' : 'bg-slate-100 text-zinc-600 hover:bg-slate-200'}`}>Fechar ✕</button>
           </div>
 
-          {/* Gerenciar Métricas Customizadas */}
+          {/* Criar Métricas */}
           <div className="space-y-3 w-full min-w-0">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide">⚙️ Criar Suas Métricas</h3>
             <form onSubmit={adicionarNovaMetricaConfig} className="flex gap-1.5 w-full">
@@ -544,7 +619,7 @@ const handleAdicionarNota = async (e) => {
             </div>
           </div>
 
-          {/* Lançamento de Valores das Métricas Ativas */}
+          {/* Lançamento de Valores */}
           <div className={`space-y-2 border-t pt-4 ${tema === 'dark' ? 'border-zinc-800/50' : 'border-slate-200'}`}>
   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide">🔢 Lançamento do Dia</h3>
   {configMetricas.map(met => (
@@ -574,7 +649,7 @@ const handleAdicionarNota = async (e) => {
   ))}
 </div>
 
-          {/* Criar Atividade Flexível ou com Horário */}
+          {/* Nova Atividade */}
           <div className={`space-y-3 border-t pt-4 ${tema === 'dark' ? 'border-zinc-800/50' : 'border-slate-200'}`}>
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide">➕ Nova Atividade</h3>
             <form onSubmit={handleAdicionarTarefa} className="space-y-2">
@@ -603,7 +678,7 @@ const handleAdicionarNota = async (e) => {
             </form>
           </div>
 
-          {/* Criar Nota de Mural */}
+          {/* Lembrete */}
           <div className={`space-y-3 border-t pt-4 ${tema === 'dark' ? 'border-zinc-800/50' : 'border-slate-200'}`}>
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide">📌 Novo Lembrete</h3>
             <form onSubmit={handleAdicionarNota} className="space-y-2">
@@ -614,7 +689,6 @@ const handleAdicionarNota = async (e) => {
 
         </div>
 
-        {/* Rodapé da Gaveta */}
         <div className={`pt-4 border-t text-center ${tema === 'dark' ? 'border-zinc-800' : 'border-slate-200'}`}>
           <p className="text-[10px] text-slate-500 font-mono">Assistente Operacional v1.4</p>
         </div>
