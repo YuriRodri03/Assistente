@@ -259,7 +259,7 @@ const handleAdicionarNota = async (e) => {
         <header className={`mb-6 border-b pb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 ${tema === 'dark' ? 'border-zinc-800' : 'border-slate-200'}`}>
           <div>
             <h1 className={`text-2xl font-extrabold tracking-tight flex items-center gap-2 ${estiloTextoPrincipal}`}>🤖 Central do Assistente</h1>
-            <p className={`${estiloTextoSecundario} text-xs mt-0.5`}>Usuário ativo: <span className="text-violet-500 font-bold">{user?.email}</span></p>
+            <p className={`${estiloTextoSecundario} text-xs mt-0.5`}>Usuário ativo: <span className="text-violet-500 font-bold">{user.user_metadata?.display_name}</span></p>
           </div>
           
           <div className="flex items-center flex-wrap gap-2">

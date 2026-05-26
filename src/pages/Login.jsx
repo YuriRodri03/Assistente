@@ -6,6 +6,7 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
   // Estados de navegação interna: 'login' | 'cadastro' | 'recuperar'
   const [modo, setModo] = useState('login'); 
   
+  const [nome, setNome] = useState(''); // Novo estado para o nome do usuário
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
@@ -14,6 +15,7 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
 
   const limparFormulario = (novoModo) => {
     setModo(novoModo);
+    setNome('');
     setEmail('');
     setSenha('');
     setConfirmarSenha('');
@@ -28,6 +30,9 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
     try {
       // --- FLUXO 1: CADASTRO DE USUÁRIO ---
       if (modo === 'cadastro') {
+        if (!nome.trim()) {
+          throw new Error('Por favor, insira o seu nome.');
+        }
         if (senha !== confirmarSenha) {
           throw new Error('As senhas digitadas não coincidem.');
         }
@@ -35,7 +40,17 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
           throw new Error('A senha precisa ter no mínimo 6 caracteres.');
         }
 
-        const { error } = await supabase.auth.signUp({ email, password: senha });
+        // Enviando o nome dentro de options.data (user_metadata)
+        const { error } = await supabase.auth.signUp({ 
+          email, 
+          password: senha,
+          options: {
+            data: {
+              display_name: nome
+            }
+          }
+        });
+        
         if (error) throw error;
 
         setMensagem({
@@ -52,7 +67,7 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
         if (!email.trim()) throw new Error('Por favor, digite o seu e-mail.');
 
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: 'https://assistente-gamma.vercel.app/',
+          redirectTo: window.location.origin,
         });
         if (error) throw error;
 
@@ -127,6 +142,22 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
 
         {/* Formulário */}
         <form onSubmit={handleAutenticacao} className="space-y-4">
+          
+          {/* CAMPO NOVO: Nome do Usuário (Exibido apenas no cadastro) */}
+          {modo === 'cadastro' && (
+            <div>
+              <label className="text-[10px] text-slate-500 block mb-1 uppercase font-bold tracking-wider">Como quer ser chamado?</label>
+              <input 
+                type="text" 
+                required
+                placeholder="Ex: Yuri Rodrigues" 
+                value={nome}
+                onChange={(e) => setNome(e.target.value)}
+                className={`w-full border rounded-xl px-3 py-2.5 text-xs focus:outline-none transition-colors ${estiloInput}`}
+              />
+            </div>
+          )}
+
           <div>
             <label className="text-[10px] text-slate-500 block mb-1 uppercase font-bold tracking-wider">E-mail de Acesso</label>
             <input 
@@ -151,7 +182,6 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
                 className={`w-full border rounded-xl px-3 py-2.5 text-xs focus:outline-none transition-colors ${estiloInput}`}
               />
               
-              {/* "Esqueceu a senha?" posicionado logo abaixo do campo de senha */}
               {modo === 'login' && (
                 <div className="flex justify-end mt-1.5">
                   <button 
