@@ -71,6 +71,78 @@ export default function Dashboard({ user, onLogout }) {
     }
   }, [user, dataSelecionada]);
 
+  // --- ESTADOS DO CLIMA EM TEMPO REAL ---
+  const [dadosClima, setDadosClima] = useState(null);
+  const [carregandoClima, setCarregandoClima] = useState(true);
+  const [erroClima, setErroClima] = useState(false);
+
+// --- BUSCA DE CLIMA EM TEMPO REAL (OPEN-METEO COM LOCALIZAÇÃO POR IP E CHUVA) ---
+  useEffect(() => {
+    const buscarClimaTempoReal = async () => {
+      try {
+        setCarregandoClima(true);
+        
+        // 1. Coordenadas padrão de Fortaleza (Fallback)
+        let lat = -3.7171;
+        let lon = -38.5434;
+        let cidadeDetectada = "Fortaleza";
+
+        try {
+          // 2. Tenta detectar a localização do usuário via IP
+          const respostaIp = await fetch('https://ipapi.co/json/');
+          if (respostaIp.ok) {
+            const dadosIp = await respostaIp.json();
+            if (dadosIp && dadosIp.latitude && dadosIp.longitude) {
+              lat = dadosIp.latitude;
+              lon = dadosIp.longitude;
+              cidadeDetectada = dadosIp.city || "Sua Localização";
+            }
+          }
+        } catch (ipErr) {
+          console.warn("Não foi possível detectar o IP, usando Fortaleza como padrão:", ipErr);
+        }
+
+        // 3. Busca os dados climáticos incluindo 'precipitation' na URL
+        const resposta = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&timezone=auto`
+        );
+        
+        if (!resposta.ok) throw new Error('Falha ao buscar dados climáticos');
+        
+        const dados = await resposta.json();
+        
+        // 4. Salva os dados no estado do clima
+        // Agora, o objeto dados.current incluirá a propriedade 'precipitation' (em mm)
+        setDadosClima(dados.current);
+        setErroClima(false);
+        
+      } catch (err) {
+        console.error("Erro ao atualizar o clima:", err);
+        setErroClima(true);
+      } finally {
+        setCarregandoClima(false);
+      }
+    };
+
+    buscarClimaTempoReal();
+    
+    // Atualiza automaticamente o clima a cada 15 minutos
+    const intervaloClima = setInterval(buscarClimaTempoReal, 900000); 
+    return () => clearInterval(intervaloClima);
+  }, []);
+
+  // --- TRADUTOR DE CÓDIGO DE CLIMA ---
+  const obterInfoClima = (codigo) => {
+    // Códigos WMO (World Meteorological Organization)
+    if (codigo === 0) return { termo: 'Céu Limpo', emoji: '☀️' };
+    if ([1, 2, 3].includes(codigo)) return { termo: 'Parcialmente Nublado', emoji: '⛅' };
+    if ([45, 48].includes(codigo)) return { termo: 'Nevoeiro', emoji: '🌫️' };
+    if ([51, 53, 55, 61, 63, 65].includes(codigo)) return { termo: 'Chuva', emoji: '🌧️' };
+    if ([80, 81, 82].includes(codigo)) return { termo: 'Pancadas de Chuva', emoji: '🌦️' };
+    if ([95, 96, 99].includes(codigo)) return { termo: 'Trovoada / Tempestade', emoji: '⛈️' };
+    return { termo: 'Instável', emoji: '☁️' };
+    };
+
   // --- AUXILIARES DE MÉTRICAS ---
   const metricasDoDia = historicoMetricas[dataSelecionada] || {};
 
@@ -286,93 +358,137 @@ const obterIconePrioridade = (prioridade) => {
   const estiloTextoPrincipal = tema === 'dark' ? 'text-white' : 'text-zinc-900';
   const estiloTextoSecundario = tema === 'dark' ? 'text-slate-400' : 'text-zinc-500';
 
-  return (
+return (
     <div className={`min-h-screen font-sans relative overflow-x-hidden transition-colors duration-300 ${estiloFundoApp}`}>
       
-      <div className={`p-6 max-w-6xl mx-auto transition-all duration-300 ${painelAberto ? 'pr-[400px] opacity-40 pointer-events-none lg:opacity-100 lg:pointer-events-auto' : ''}`}>
-        
-        {/* CABEÇALHO */}
-        <header className={`mb-6 border-b pb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 ${tema === 'dark' ? 'border-zinc-800' : 'border-slate-200'}`}>
-          <div>
-            <h1 className={`text-2xl font-extrabold tracking-tight flex items-center gap-2 ${estiloTextoPrincipal}`}>🤖 Central do Assistente</h1>
-            <p className={`${estiloTextoSecundario} text-xs mt-0.5`}>Usuário ativo: <span className="text-violet-500 font-bold">{user.user_metadata?.display_name || user.email}</span></p>
-          </div>
+      {/* BARRA SUPERIOR (HEADER) TOTALMENTE RESPONSIVA */}
+      <header className={`border-b p-4 transition-all ${tema === 'dark' ? 'bg-zinc-950 border-zinc-900' : 'bg-white border-slate-200 shadow-sm'}`}>
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           
-          <div className="flex items-center flex-wrap gap-2">
-            <button
-              onClick={() => { if (permissaoNotificacao !== 'granted') solicitarPermissaoNotificacao(); else setAlertasLigados(!alertasLigados); }}
-              className={`text-xs px-3 h-[38px] rounded-xl border font-bold transition-all active:scale-95 cursor-pointer ${
-                permissaoNotificacao === 'granted' ? alertasLigados ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-zinc-800 border-zinc-700 text-slate-400' : 'bg-zinc-900 border-zinc-800 text-slate-400'
-              }`}
-            >
-              {permissaoNotificacao !== 'granted' ? '🔔 Ativar Alertas' : alertasLigados ? '🔔 Alertas Ligados' : '🔕 Alertas Pausados'}
-            </button>
-
-            <button onClick={() => setTema(tema === 'dark' ? 'light' : 'dark')} className={`p-2 rounded-xl border text-xs h-[38px] cursor-pointer font-bold ${tema === 'dark' ? 'bg-zinc-900 border-zinc-800 text-amber-400' : 'bg-white border-slate-300 text-indigo-600 shadow-sm'}`}>
-              {tema === 'dark' ? '☀️ Claro' : '🌙 Escuro'}
-            </button>
-            
-            <div className={`border px-3 py-1.5 rounded-xl ${tema === 'dark' ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-sm'}`}>
-              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Dia Ativo</p>
-              <p className="text-xs font-bold text-violet-500 font-mono">{formatarDataExibicao(dataSelecionada)}</p>
+          {/* Lado Esquerdo: Logo e Título */}
+          <div className="flex items-center justify-between md:justify-start gap-3">
+            <div className="flex items-center gap-2.5">
+              {/* Sua logo SVG */}
+              <div className="w-7 h-7 text-violet-500">
+                <svg viewBox="0 0 512 512" fill="currentColor">
+                  <path d="M256,40 L430,140 L430,340 L256,440 L82,340 L82,140 Z" fill="currentColor" className="text-violet-600"/>
+                </svg>
+              </div>
+              <span className={`text-base font-bold tracking-tight ${estiloTextoPrincipal}`}>
+                Central do Assistente
+              </span>
             </div>
 
-            <button onClick={() => setPainelAberto(true)} className="bg-violet-600 hover:bg-violet-500 text-white font-semibold text-xs px-4 h-[38px] rounded-xl cursor-pointer">⚙️ Registrar</button>
-            
-            <button onClick={onLogout} className="bg-zinc-800 border border-zinc-700 text-red-400 hover:bg-red-500/10 font-semibold text-xs px-3 h-[38px] rounded-xl cursor-pointer">
-              🚪 Sair
-            </button>
+            {/* Identificador visual de data (Apenas no Mobile para equilibrar o espaço) */}
+            <div className="text-xs font-medium md:hidden opacity-80 px-2 py-1 rounded-md bg-violet-500/10 text-violet-400">
+              Hoje
+            </div>
           </div>
-        </header>
 
+          {/* Lado Direito: Bloco Unificado de Ações e Controles */}
+          <div className="flex items-center justify-end gap-2 w-full md:w-auto">
+            
+            {/* Grupo de Alternadores (Alerta, Tema) */}
+            <div className={`flex items-center gap-1 p-1 rounded-xl ${tema === 'dark' ? 'bg-zinc-900/60' : 'bg-slate-100'}`}>
+              {/* Botão Alerta */}
+              <button 
+                type="button" 
+                onClick={() => setAlertasLigados(!alertasLigados)}
+                className={`p-2 rounded-lg text-sm transition-all cursor-pointer ${alertasLigados ? 'text-amber-500 bg-amber-500/10' : 'text-slate-400 hover:bg-slate-500/10'}`}
+              >
+                {alertasLigados ? '🔔' : '🔕'}
+              </button>
+
+              {/* Botão Tema (Claro/Escuro) */}
+              <button 
+                type="button" 
+                onClick={() => setTema(tema === 'dark' ? 'light' : 'dark')}
+                className="p-2 rounded-lg text-sm text-slate-400 hover:bg-slate-500/10 transition-all cursor-pointer"
+              >
+                {tema === 'dark' ? '☀️' : '🌙'}
+              </button>
+            </div>
+
+            {/* Grupo de Navegação e Sessão (Entrar/Sair) */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPainelAberto(true)}
+                className={`p-2 px-3 text-xs font-bold rounded-xl border transition-all cursor-pointer ${tema === 'dark' ? 'bg-zinc-900 border-zinc-800 text-slate-200 hover:bg-zinc-800' : 'bg-white border-slate-200 text-zinc-700 hover:bg-slate-50'}`}
+              >
+                Painel
+              </button>
+
+              <button
+                type="button"
+                onClick={onLogout}
+                className="p-2 px-3 text-xs font-bold rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all cursor-pointer border border-red-500/20"
+              >
+                Sair
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </header>
+
+      {/* CORPO CENTRAL DO DASHBOARD */}
+      <div className={`p-6 max-w-7xl mx-auto transition-all duration-300 ${painelAberto ? 'pr-[400px] opacity-40 pointer-events-none lg:opacity-100 lg:pointer-events-auto' : ''}`}>
+        
         {/* CALENDÁRIO MENSAL E CLIMA */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+          
+          {/* Card do Calendário */}
           <div className={`border p-5 rounded-2xl lg:col-span-2 ${estiloCard}`}>
             <h3 className={`text-xs font-extrabold uppercase tracking-wider mb-3 ${estiloTextoSecundario}`}>📅 Visão Mensal</h3>
+            
             {/* CABEÇALHO DO CALENDÁRIO COM NAVEGAÇÃO */}
-<div className="flex items-center justify-between mb-4 gap-2">
-  <button 
-    onClick={() => mudarMes(-1)}
-    className={`p-2 rounded-lg border ${tema === 'dark' ? 'border-zinc-800 hover:bg-zinc-800' : 'border-slate-200 hover:bg-slate-100'}`}
-  >
-    ◀
-  </button>
+            <div className="flex items-center justify-between mb-4 gap-2">
+              <button 
+                type="button"
+                onClick={() => mudarMes(-1)}
+                className={`p-2 rounded-lg border ${tema === 'dark' ? 'border-zinc-800 hover:bg-zinc-800' : 'border-slate-200 hover:bg-slate-100'}`}
+              >
+                ◀
+              </button>
 
-  <div className="flex gap-2">
-    {/* Seletor de Mês */}
-    <select
-      value={parseInt(dataSelecionada.split('-')[1])}
-      onChange={(e) => selecionarMesDireto(Number(e.target.value))}
-      className={`p-1.5 rounded-lg border font-semibold text-sm ${estiloInput}`}
-    >
-      {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((m, idx) => (
-        <option key={m} value={idx + 1}>{m}</option>
-      ))}
-    </select>
+              <div className="flex gap-2">
+                <select
+                  value={parseInt(dataSelecionada.split('-')[1])}
+                  onChange={(e) => selecionarMesDireto(Number(e.target.value))}
+                  className={`p-1.5 rounded-lg border font-semibold text-sm ${estiloInput}`}
+                >
+                  {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((m, idx) => (
+                    <option key={m} value={idx + 1}>{m}</option>
+                  ))}
+                </select>
 
-    {/* Seletor de Ano */}
-    <select
-      value={parseInt(dataSelecionada.split('-')[0])}
-      onChange={(e) => selecionarAnoDireto(Number(e.target.value))}
-      className={`p-1.5 rounded-lg border font-semibold text-sm ${estiloInput}`}
-    >
-      {/* Gera uma lista de anos: 5 anos para trás e 5 para frente */}
-      {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - 5 + i).map(ano => (
-        <option key={ano} value={ano}>{ano}</option>
-      ))}
-    </select>
-  </div>
+                <select
+                  value={parseInt(dataSelecionada.split('-')[0])}
+                  onChange={(e) => selecionarAnoDireto(Number(e.target.value))}
+                  className={`p-1.5 rounded-lg border font-semibold text-sm ${estiloInput}`}
+                >
+                  {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - 5 + i).map(ano => (
+                    <option key={ano} value={ano}>{ano}</option>
+                  ))}
+                </select>
+              </div>
 
-  <button 
-    onClick={() => mudarMes(1)}
-    className={`p-2 rounded-lg border ${tema === 'dark' ? 'border-zinc-800 hover:bg-zinc-800' : 'border-slate-200 hover:bg-slate-100'}`}
-  >
-    ▶
-  </button>
-</div>
+              <button 
+                type="button"
+                onClick={() => mudarMes(1)}
+                className={`p-2 rounded-lg border ${tema === 'dark' ? 'border-zinc-800 hover:bg-zinc-800' : 'border-slate-200 hover:bg-slate-100'}`}
+              >
+                ▶
+              </button>
+            </div>
+
+            {/* Dias da semana */}
             <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-500 mb-2">
               <span>DOM</span><span>SEG</span><span>TER</span><span>QUA</span><span>QUI</span><span>SEX</span><span>SÁB</span>
             </div>
+
+            {/* Grade numérica de dias */}
             <div className="grid grid-cols-7 gap-1.5">
               {gerarDiasDoMes().map((dayStr, index) => {
                 if (!dayStr) return <div key={`empty-${index}`} className="opacity-0" />;
@@ -384,6 +500,7 @@ const obterIconePrioridade = (prioridade) => {
                 return (
                   <button
                     key={dayStr}
+                    type="button"
                     onClick={() => setDataSelecionada(dayStr)}
                     className={`h-9 rounded-xl text-xs font-mono relative flex items-center justify-center transition-all cursor-pointer ${estaSelecionado ? 'bg-violet-600 text-white font-extrabold shadow-md' : ehHojeReal ? 'bg-violet-500/20 text-violet-500 border-2 border-violet-500 ring-2 ring-violet-500/10' : tema === 'dark' ? 'bg-zinc-900/60 text-slate-300 border border-zinc-800/40' : 'bg-slate-100 text-zinc-700 border border-slate-200'}`}
                   >
@@ -396,23 +513,79 @@ const obterIconePrioridade = (prioridade) => {
             </div>
           </div>
 
-          <div className={`border p-5 rounded-2xl flex flex-col justify-between ${estiloCard}`}>
+         {/* CARD DO CLIMA EM TEMPO REAL */}
+          <div className={`border p-5 rounded-2xl flex flex-col justify-between transition-all ${estiloCard}`}>
             <div>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Condições do Tempo</p>
-              <div className="flex items-center justify-between mt-2">
-                <div>
-                  <h4 className={`text-3xl font-black ${estiloTextoPrincipal}`}>28°C</h4>
-                  <p className="text-xs text-slate-400">Fortaleza, Ceará</p>
-                </div>
-                <span className="text-5xl filter drop-shadow-md">☀️</span>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className={`text-xs font-extrabold uppercase tracking-wider ${estiloTextoSecundario}`}>
+                  🌤️ Condições Climáticas
+                </h3>
+                <span className="text-[10px] bg-violet-500/10 text-violet-400 px-2 py-0.5 rounded-full font-mono font-bold uppercase tracking-widest">
+                  Live
+                </span>
               </div>
+
+              {carregandoClima ? (
+                <div className="py-8 flex flex-col items-center justify-center gap-2">
+                  <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs text-slate-500 font-medium">Sincronizando satélites...</span>
+                </div>
+              ) : erroClima || !dadosClima ? (
+                <div className="py-8 text-center">
+                  <span className="text-sm">⚠️ Não foi possível carregar o clima.</span>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Bloco Principal: Temperatura e Estado Atual */}
+                  <div className="flex items-center gap-4 py-2">
+                    <span className="text-4xl filter drop-shadow-sm animate-pulse">
+                      {obterInfoClima(dadosClima.weather_code).emoji}
+                    </span>
+                    <div>
+                      <div className={`text-3xl font-black font-mono tracking-tight ${estiloTextoPrincipal}`}>
+                        {Math.round(dadosClima.temperature_2m)}°C
+                      </div>
+                      <div className={`text-xs font-semibold uppercase tracking-wide text-violet-400`}>
+                        {obterInfoClima(dadosClima.weather_code).termo}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Métricas Operacionais Secundárias (Expandido para 3 colunas) */}
+                  <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-zinc-800/20 dark:border-zinc-800/60">
+                    <div className={`p-2 rounded-xl border text-center ${tema === 'dark' ? 'bg-zinc-900/40 border-zinc-900/60' : 'bg-slate-100 border-slate-200'}`}>
+                      <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-tight">Sensação</span>
+                      <span className={`text-xs font-mono font-bold ${estiloTextoPrincipal}`}>
+                        {Math.round(dadosClima.apparent_temperature)}°C
+                      </span>
+                    </div>
+                    
+                    <div className={`p-2 rounded-xl border text-center ${tema === 'dark' ? 'bg-zinc-900/40 border-zinc-900/60' : 'bg-slate-100 border-slate-200'}`}>
+                      <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-tight">Umidade</span>
+                      <span className={`text-xs font-mono font-bold ${estiloTextoPrincipal}`}>
+                        {dadosClima.relative_humidity_2m}%
+                      </span>
+                    </div>
+
+                    <div className={`p-2 rounded-xl border text-center ${tema === 'dark' ? 'bg-zinc-900/40 border-zinc-900/60' : 'bg-slate-100 border-slate-200'}`}>
+                      <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-tight">Chuva</span>
+                      <span className={`text-xs font-mono font-bold ${dadosClima.precipitation > 0 ? 'text-blue-400 font-extrabold' : estiloTextoPrincipal}`}>
+                        {dadosClima.precipitation ?? 0}mm
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className={`mt-4 pt-3 border-t text-xs text-slate-400 ${tema === 'dark' ? 'border-zinc-800/60' : 'border-slate-100'}`}>
-              <span className="text-emerald-500 font-bold">● Ensolarado</span>
+
+            <div className="text-[10px] font-medium text-slate-500 mt-4 pt-2 border-t border-zinc-800/10 dark:border-zinc-800/40 flex justify-between items-center">
+              <span>Localização Dinâmica</span>
+              <span className="font-mono">Obs: Atualiza a cada 15m</span>
             </div>
           </div>
-        </div>
 
+        </div> {/* Fecha a div grid do Calendário + Clima */}
+        
         {/* CONTADORES DE MÉTRICAS */}
         <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-6">
           {configMetricas.map(met => (
@@ -585,9 +758,9 @@ const obterIconePrioridade = (prioridade) => {
           </div>
         </section>
 
-      </div>
+      </div> {/* Fecha o Corpo Central do Dashboard */}
 
-      {/* --- GAVETA LATERAL DE EDIÇÃO --- */}
+      {/* GAVETA LATERAL DE EDIÇÃO */}
       <div className={`fixed top-0 right-0 h-full w-[380px] max-w-full border-l shadow-2xl p-6 transform transition-transform duration-300 ease-in-out z-50 flex flex-col justify-between overflow-y-auto ${painelAberto ? 'translate-x-0' : 'translate-x-full'} ${tema === 'dark' ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200'}`}>
         <div className="w-full min-w-0 space-y-6">
           
@@ -603,15 +776,15 @@ const obterIconePrioridade = (prioridade) => {
           <div className="space-y-3 w-full min-w-0">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide">⚙️ Criar Suas Métricas</h3>
             <form onSubmit={adicionarNovaMetricaConfig} className="flex gap-1.5 w-full">
-              <input type="text" placeholder="Ex: Trabalho, Leitura..." value={novaMetricaNome} onChange={(e) => setNovaMetricaNome(e.target.value)} className={`flex-1 border rounded-lg p-1.5 text-xs focus:outline-none ${estiloInput}`} />
+              <input type="text" placeholder="Ex: Trabalho, Leitura..." value={novaMetricaNome} onChange={(e) => setNovaMetricaNome(e.target.value)} className={`flex-1 border rounded-lg p-3 text-xs focus:outline-none ${estiloInput}`} />
               <select value={novaMetricaIcone} onChange={(e) => setNovaMetricaIcone(e.target.value)} className={`border rounded-lg p-1.5 text-xs focus:outline-none ${estiloInput}`}>
                 <option value="📊">📊</option><option value="💼">💼</option><option value="🏃">🏃</option><option value="💧">💧</option><option value="📖">📖</option>
               </select>
-              <button type="submit" className="bg-violet-600 hover:bg-violet-500 px-3 py-1.5 text-white rounded-lg text-xs font-bold cursor-pointer">+</button>
+              <button type="submit" className="bg-violet-600 hover:bg-violet-500 px-5 py-3 text-white rounded-lg text-xs font-bold cursor-pointer">+</button>
             </form>
             <div className="flex flex-wrap gap-1.5 pt-1">
               {configMetricas.map(m => (
-                <span key={m.id} className={`text-[10px] px-2 py-1 border rounded-md flex items-center gap-1.5 ${tema === 'dark' ? 'bg-zinc-950 border-zinc-800 text-white' : 'bg-slate-50 border-slate-200 text-zinc-800'}`}>
+                <span key={m.id} className={`text-[11px] px-5 py-3 border rounded-md flex items-center gap-1.5 ${tema === 'dark' ? 'bg-zinc-950 border-zinc-800 text-white' : 'bg-slate-50 border-slate-200 text-zinc-800'}`}>
                   <span>{m.icone} {m.nome}</span>
                   <button type="button" onClick={() => removerMetricaConfig(m.id)} className="text-red-400 hover:text-red-500 font-bold cursor-pointer">✕</button>
                 </span>
@@ -621,33 +794,18 @@ const obterIconePrioridade = (prioridade) => {
 
           {/* Lançamento de Valores */}
           <div className={`space-y-2 border-t pt-4 ${tema === 'dark' ? 'border-zinc-800/50' : 'border-slate-200'}`}>
-  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide">🔢 Lançamento do Dia</h3>
-  {configMetricas.map(met => (
-    <div key={met.id} className={`flex items-center justify-between p-2 rounded-xl border gap-2 w-full min-w-0 ${tema === 'dark' ? 'bg-zinc-950 border-zinc-800' : 'bg-slate-50 border-slate-200'}`}>
-      <span className={`text-xs truncate flex-1 ${tema === 'dark' ? 'text-slate-300' : 'text-zinc-700'}`}>{met.icone} {met.nome}</span>
-      <div className="flex items-center gap-2 flex-shrink-0">
-        {/* Botão de Subtrair Horas */}
-        <button 
-          onClick={() => mudarValorMetrica(met.id, -0.5)} 
-          className={`px-2 py-0.5 rounded text-xs font-bold cursor-pointer transition-all active:scale-95 ${tema === 'dark' ? 'bg-zinc-800 text-white hover:bg-zinc-700' : 'bg-slate-200 text-zinc-800 hover:bg-slate-300'}`}
-        >
-          -
-        </button>
-        
-        {/* Exibição do Valor */}
-        <span className={`text-xs font-mono font-bold w-12 text-center ${estiloTextoPrincipal}`}>{metricasDoDia[met.id] || 0}h</span>
-        
-        {/* Botão de Somar Horas (RESTAURADO) */}
-        <button 
-          onClick={() => mudarValorMetrica(met.id, 0.5)} 
-          className={`px-2 py-0.5 rounded text-xs font-bold cursor-pointer transition-all active:scale-95 ${tema === 'dark' ? 'bg-zinc-800 text-white hover:bg-zinc-700' : 'bg-slate-200 text-zinc-800 hover:bg-slate-300'}`}
-        >
-          +
-        </button>
-      </div>
-    </div>
-  ))}
-</div>
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide">🔢 Lançamento do Dia</h3>
+            {configMetricas.map(met => (
+              <div key={met.id} className={`flex items-center justify-between p-2 rounded-xl border gap-2 w-full min-w-0 ${tema === 'dark' ? 'bg-zinc-950 border-zinc-800' : 'bg-slate-50 border-slate-200'}`}>
+                <span className={`text-xs truncate flex-1 ${tema === 'dark' ? 'text-slate-300' : 'text-zinc-700'}`}>{met.icone} {met.nome}</span>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button onClick={() => mudarValorMetrica(met.id, -0.5)} className={`px-2 py-0.5 rounded text-xs font-bold cursor-pointer transition-all active:scale-95 ${tema === 'dark' ? 'bg-zinc-800 text-white hover:bg-zinc-700' : 'bg-slate-200 text-zinc-800 hover:bg-slate-300'}`}>-</button>
+                  <span className={`text-xs font-mono font-bold w-12 text-center ${estiloTextoPrincipal}`}>{metricasDoDia[met.id] || 0}h</span>
+                  <button onClick={() => mudarValorMetrica(met.id, 0.5)} className={`px-2 py-0.5 rounded text-xs font-bold cursor-pointer transition-all active:scale-95 ${tema === 'dark' ? 'bg-zinc-800 text-white hover:bg-zinc-700' : 'bg-slate-200 text-zinc-800 hover:bg-slate-300'}`}>+</button>
+                </div>
+              </div>
+            ))}
+          </div>
 
           {/* Nova Atividade */}
           <div className={`space-y-3 border-t pt-4 ${tema === 'dark' ? 'border-zinc-800/50' : 'border-slate-200'}`}>
@@ -695,5 +853,4 @@ const obterIconePrioridade = (prioridade) => {
       </div>
 
     </div>
-  );
-}
+  );}
