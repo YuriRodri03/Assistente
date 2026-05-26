@@ -51,9 +51,8 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
       else if (modo === 'recuperar') {
         if (!email.trim()) throw new Error('Por favor, digite o seu e-mail.');
 
-        // O Supabase envia o link de redefinição para o e-mail fornecido
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: window.location.origin, // Redireciona de volta para o seu app na Vercel ou Localhost
+          redirectTo: window.location.origin,
         });
         if (error) throw error;
 
@@ -126,7 +125,7 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
           </div>
         )}
 
-        {/* Formulário Centralizado */}
+        {/* Formulário */}
         <form onSubmit={handleAutenticacao} className="space-y-4">
           <div>
             <label className="text-[10px] text-slate-500 block mb-1 uppercase font-bold tracking-wider">E-mail de Acesso</label>
@@ -142,18 +141,7 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
 
           {modo !== 'recuperar' && (
             <div>
-              <div className="flex justify-between items-center mb-1">
-                <label className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Senha de Segurança</label>
-                {modo === 'login' && (
-                  <button 
-                    type="button"
-                    onClick={() => limparFormulario('recuperar')}
-                    className="text-[10px] text-violet-500 font-semibold hover:underline bg-transparent border-none cursor-pointer"
-                  >
-                    Esqueceu a senha?
-                  </button>
-                )}
-              </div>
+              <label className="text-[10px] text-slate-500 block mb-1 uppercase font-bold tracking-wider">Senha de Segurança</label>
               <input 
                 type="password" 
                 required
@@ -162,6 +150,19 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
                 onChange={(e) => setSenha(e.target.value)}
                 className={`w-full border rounded-xl px-3 py-2.5 text-xs focus:outline-none transition-colors ${estiloInput}`}
               />
+              
+              {/* "Esqueceu a senha?" posicionado logo abaixo do campo de senha */}
+              {modo === 'login' && (
+                <div className="flex justify-end mt-1.5">
+                  <button 
+                    type="button"
+                    onClick={() => limparFormulario('recuperar')}
+                    className="text-[11px] text-violet-500 font-semibold hover:text-violet-400 hover:underline bg-transparent border-none cursor-pointer p-0"
+                  >
+                    Esqueceu a senha?
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -182,7 +183,7 @@ export default function Login({ onLoginSuccess, tema, setTema }) {
           <button 
             type="submit" 
             disabled={loading}
-            className="w-full bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white font-semibold py-2.5 rounded-xl text-xs transition-all cursor-pointer shadow-lg shadow-violet-600/10"
+            className="w-full bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white font-semibold py-2.5 rounded-xl text-xs transition-all cursor-pointer shadow-lg shadow-violet-600/10 mt-2"
           >
             {loading ? 'Processando dados...' : 
              modo === 'login' ? 'Entrar no Sistema' : 

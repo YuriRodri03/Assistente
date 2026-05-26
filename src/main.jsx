@@ -1,43 +1,60 @@
-// src/App.jsx
+// src/main.jsx
 import React, { useState, useEffect } from 'react';
+import ReactDOM from 'react-dom/client';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import { supabase } from './supabaseClient';
+import './index.css'; // Garante que os estilos do Tailwind sejam carregados
 
-export default function App() {
+function Main() {
   const [sessionUser, setSessionUser] = useState(null);
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [tema, setTema] = useState('dark');
   
-  // Estado para controlar o modal de troca de senha forçada
+  // Estados para controlar o fluxo de redefinição de senha
   const [emRecuperacao, setEmRecuperacao] = useState(false);
   const [novaSenha, setNovaSenha] = useState('');
   const [loadingSenha, setLoadingSenha] = useState(false);
 
   useEffect(() => {
-    // 1. Verificar sessão existente
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) setSessionUser(session.user);
-      setLoadingInitial(false);
-    });
+    // 1. Verifica se já existe uma sessão de usuário ativa ao carregar a página
+    const checarSessao = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          setSessionUser(session.user);
+        }
+      } catch (err) {
+        console.error("Erro ao verificar sessão inicial:", err);
+      } finally {
+        setLoadingInitial(false); // Força a saída do loading para evitar tela branca
+      }
+    };
 
-    // 2. Escutar mudanças na sessão (Login, Logout e Recuperação)
+    checarSessao();
+
+    // 2. Ouve em tempo real as mudanças de autenticação (Login, Logout, Recuperação)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user) setSessionUser(session.user);
-      else setSessionUser(null);
+      if (session?.user) {
+        setSessionUser(session.user);
+      } else {
+        setSessionUser(null);
+      }
 
-      // O Supabase dispara o evento 'PASSWORD_RECOVERY' quando o usuário vem do link do e-mail
+      // Disparado quando o usuário clica no link enviado para o e-mail
       if (event === 'PASSWORD_RECOVERY') {
         setEmRecuperacao(true);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      if (subscription) subscription.unsubscribe();
+    };
   }, []);
 
   const handleAtualizarSenhaRecuperada = async (e) => {
     e.preventDefault();
-    if (novaSenha.length < 6) return alert("A nova senha deve ter pelo menos 6 dígitos.");
+    if (novaSenha.length < 6) return alert("A nova senha deve ter pelo menos 6 caracteres.");
     
     setLoadingSenha(true);
     const { error } = await supabase.auth.updateUser({ password: novaSenha });
@@ -57,21 +74,25 @@ export default function App() {
     setSessionUser(null);
   };
 
+  // 1. Tela de Carregamento Inicial (Previne o congelamento visual)
   if (loadingInitial) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-xs font-mono text-slate-400">
-        Autenticando sessão segura...
+        <div className="flex flex-col items-center gap-2">
+          <span className="text-xl animate-spin">⏳</span>
+          <span>Autenticando sessão segura...</span>
+        </div>
       </div>
     );
   }
 
-  // Se o usuário clicou no link do e-mail, exibe a tela de redefinição
+  // 2. Tela de Redefinição de Senha (Ativada pelo link do e-mail)
   if (emRecuperacao) {
     return (
       <div className={`min-h-screen flex items-center justify-center p-4 ${tema === 'dark' ? 'bg-zinc-950 text-white' : 'bg-slate-50 text-zinc-900'}`}>
         <div className={`w-full max-w-sm p-6 border rounded-2xl ${tema === 'dark' ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-xl'}`}>
           <h2 className="text-xl font-black mb-2 text-center">🔐 Criar Nova Senha</h2>
-          <p className="text-xs text-slate-500 mb-4 text-center">Sua identidade foi confirmada por e-mail. Defina sua nova senha de acesso abaixo:</p>
+          <p className="text-xs text-slate-500 mb-4 text-center">Sua identidade foi confirmada por e-mail. Defina a sua nova senha de acesso abaixo:</p>
           <form onSubmit={handleAtualizarSenhaRecuperada} className="space-y-4">
             <input 
               type="password" 
@@ -90,10 +111,17 @@ export default function App() {
     );
   }
 
-  // Fluxo de telas normal
+  // 3. Fluxo de Telas Normal (Usuário Deslogado -> Login | Logado -> Dashboard)
   if (!sessionUser) {
     return <Login onLoginSuccess={(user) => setSessionUser(user)} tema={tema} setTema={setTema} />;
   }
 
   return <Dashboard user={sessionUser} onLogout={handleLogout} tema={tema} setTema={setTema} />;
 }
+
+// Renderização oficial no nó Root do HTML
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <Main />
+  </React.StrictMode>
+);
