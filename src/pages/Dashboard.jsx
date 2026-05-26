@@ -546,18 +546,33 @@ const handleAdicionarNota = async (e) => {
 
           {/* Lançamento de Valores das Métricas Ativas */}
           <div className={`space-y-2 border-t pt-4 ${tema === 'dark' ? 'border-zinc-800/50' : 'border-slate-200'}`}>
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide">🔢 Lançamento do Dia</h3>
-            {configMetricas.map(met => (
-              <div key={met.id} className={`flex items-center justify-between p-2 rounded-xl border gap-2 w-full min-w-0 ${tema === 'dark' ? 'bg-zinc-950 border-zinc-800' : 'bg-slate-50 border-slate-200'}`}>
-                <span className={`text-xs truncate flex-1 ${tema === 'dark' ? 'text-slate-300' : 'text-zinc-700'}`}>{met.icone} {met.nome}</span>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button onClick={() => mudarValorMetrica(met.id, -0.5)} className={`px-2 py-0.5 rounded text-xs font-bold cursor-pointer ${tema === 'dark' ? 'bg-zinc-800 text-white' : 'bg-slate-200 text-zinc-800'}`}>-</button>
-                  <span className={`text-xs font-mono font-bold w-12 text-center ${estiloTextoPrincipal}`}>{metricasDoDia[met.id] || 0}h</span>
-                  <button onClick={() => mudarValorMetrica(met.id, 0.5)} className={`px-2 py-0.5 rounded text-xs font-bold cursor-pointer ${tema === 'dark' ? 'bg-zinc-800 text-white' : 'bg-slate-200 text-zinc-800'}`}></button>
-                </div>
-              </div>
-            ))}
-          </div>
+  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide">🔢 Lançamento do Dia</h3>
+  {configMetricas.map(met => (
+    <div key={met.id} className={`flex items-center justify-between p-2 rounded-xl border gap-2 w-full min-w-0 ${tema === 'dark' ? 'bg-zinc-950 border-zinc-800' : 'bg-slate-50 border-slate-200'}`}>
+      <span className={`text-xs truncate flex-1 ${tema === 'dark' ? 'text-slate-300' : 'text-zinc-700'}`}>{met.icone} {met.nome}</span>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Botão de Subtrair Horas */}
+        <button 
+          onClick={() => mudarValorMetrica(met.id, -0.5)} 
+          className={`px-2 py-0.5 rounded text-xs font-bold cursor-pointer transition-all active:scale-95 ${tema === 'dark' ? 'bg-zinc-800 text-white hover:bg-zinc-700' : 'bg-slate-200 text-zinc-800 hover:bg-slate-300'}`}
+        >
+          -
+        </button>
+        
+        {/* Exibição do Valor */}
+        <span className={`text-xs font-mono font-bold w-12 text-center ${estiloTextoPrincipal}`}>{metricasDoDia[met.id] || 0}h</span>
+        
+        {/* Botão de Somar Horas (RESTAURADO) */}
+        <button 
+          onClick={() => mudarValorMetrica(met.id, 0.5)} 
+          className={`px-2 py-0.5 rounded text-xs font-bold cursor-pointer transition-all active:scale-95 ${tema === 'dark' ? 'bg-zinc-800 text-white hover:bg-zinc-700' : 'bg-slate-200 text-zinc-800 hover:bg-slate-300'}`}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  ))}
+</div>
 
           {/* Criar Atividade Flexível ou com Horário */}
           <div className={`space-y-3 border-t pt-4 ${tema === 'dark' ? 'border-zinc-800/50' : 'border-slate-200'}`}>
