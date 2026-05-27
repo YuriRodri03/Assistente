@@ -1,4 +1,3 @@
-// src/pages/Dashboard.jsx
 import React, { useState, useEffect } from 'react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 // Importando o cliente conectado do Supabase
@@ -16,9 +15,21 @@ export default function Dashboard({ user, onLogout }) {
   );
   const [alertasLigados, setAlertasLigados] = useState(true);
 
+  // --- CONFIGURAÇÃO DEFINITIVA DO FUSO HORÁRIO BRASILEIRO ---
+const obterDataLocalBR = () => {
+  const d = new Date();
+  const formatador = new Intl.DateTimeFormat('fr-CA', {
+    timeZone: 'America/Fortaleza',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  return formatador.format(d);
+};
+
   // --- CONTROLE DE DATA ---
-  const [dataSelecionada, setDataSelecionada] = useState(new Date().toISOString().split('T')[0]);
-  const diaHojeReal = new Date().toISOString().split('T')[0];
+  const [dataSelecionada, setDataSelecionada] = useState(obterDataLocalBR());
+  const diaHojeReal = obterDataLocalBR();
 
   // --- CONFIGURAÇÃO DE MÉTRICAS MOLDÁVEIS ---
   const [configMetricas, setConfigMetricas] = useState([
@@ -89,7 +100,7 @@ export default function Dashboard({ user, onLogout }) {
 
         try {
           // 2. Tenta detectar a localização do usuário via IP
-          const respostaIp = await fetch('https://ipapi.co/json/');
+          const respostaIp = await fetch('https://ipinfo.io/json?token=');
           if (respostaIp.ok) {
             const dadosIp = await respostaIp.json();
             if (dadosIp && dadosIp.latitude && dadosIp.longitude) {
@@ -729,19 +740,19 @@ return (
         {dadosGrafico.length > 0 && (
           <div className={`border p-5 rounded-2xl mb-6 ${estiloCard}`}>
             <h3 className="text-xs font-bold mb-4 text-slate-400 uppercase tracking-wider">📈 Análise Histórica de Métricas</h3>
-            <div className="h-56 w-full text-[10px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={dadosGrafico} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={tema === 'dark' ? "#27272a" : "#e2e8f0"} />
-                  <XAxis dataKey="dataFormatada" stroke="#71717a" />
-                  <YAxis stroke="#71717a" />
-                  <Tooltip contentStyle={{ backgroundColor: tema === 'dark' ? '#18181b' : '#ffffff', color: tema === 'dark' ? '#f4f4f5' : '#1e293b' }} />
-                  {configMetricas.map(met => (
-                    <Area key={met.id} type="monotone" dataKey={met.nome} stroke={met.cor} strokeWidth={2} fillOpacity={0.01} fill={met.cor} />
-                  ))}
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+            <div className="h-56 w-full text-[10px]" style={{ minWidth: 0 }}> {/* Força o cálculo correto do espaço */}
+  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+    <AreaChart data={dadosGrafico} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+      <CartesianGrid strokeDasharray="3 3" stroke={tema === 'dark' ? "#27272a" : "#e2e8f0"} />
+      <XAxis dataKey="dataFormatada" stroke="#71717a" />
+      <YAxis stroke="#71717a" />
+      <Tooltip contentStyle={{ backgroundColor: tema === 'dark' ? '#18181b' : '#ffffff', color: tema === 'dark' ? '#f4f4f5' : '#1e293b' }} />
+      {configMetricas.map(met => (
+        <Area key={met.id} type="monotone" dataKey={met.nome} stroke={met.cor} strokeWidth={2} fillOpacity={0.01} fill={met.cor} />
+      ))}
+    </AreaChart>
+  </ResponsiveContainer>
+</div>
           </div>
         )}
 
