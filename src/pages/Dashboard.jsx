@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-// Importando o cliente conectado do Supabase
 import { supabase } from '../supabaseClient';
+import AssistenteVoz from './Assistentedevoz'; 
 
 export default function Dashboard({ user, onLogout }) {
   // --- CONTROLES DE INTERFACE ---
@@ -16,18 +16,19 @@ export default function Dashboard({ user, onLogout }) {
   const [alertasLigados, setAlertasLigados] = useState(true);
 
   // --- CONFIGURAÇÃO DEFINITIVA DO FUSO HORÁRIO BRASILEIRO ---
-const obterDataLocalBR = () => {
-  const d = new Date();
-  const formatador = new Intl.DateTimeFormat('fr-CA', {
-    timeZone: 'America/Fortaleza',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  });
-  return formatador.format(d);
-};
+ function obterDataLocalBR() {
+    const d = new Date();
+    const formatador = new Intl.DateTimeFormat('fr-CA', {
+      timeZone: 'America/Fortaleza',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    return formatador.format(d);
+  }
 
   // --- CONTROLE DE DATA ---
+  // Agora o useState pode chamar a função logo acima sem gerar o erro de compilação
   const [dataSelecionada, setDataSelecionada] = useState(obterDataLocalBR());
   const diaHojeReal = obterDataLocalBR();
 
@@ -53,6 +54,9 @@ const obterDataLocalBR = () => {
   const [prioridadeTarefa, setPrioridadeTarefa] = useState('media'); 
   const [novaNota, setNovaNota] = useState('');
   const [tarefaIdAdiar, setTarefaIdAdiar] = useState(null);
+
+  // --- ESTADO ADICIONADO PARA GERENCIAR O PRAZO DA TAREFA ---
+  const [prazoTarefa, setPrazoTarefa] = useState('diaria');
 
   // --- 🔄 BUSCAR DADOS DO SUPABASE (Filtrado por Usuário Logado) ---
   const buscarDadosDoSupabase = async () => {
@@ -87,19 +91,17 @@ const obterDataLocalBR = () => {
   const [carregandoClima, setCarregandoClima] = useState(true);
   const [erroClima, setErroClima] = useState(false);
 
-// --- BUSCA DE CLIMA EM TEMPO REAL (OPEN-METEO COM LOCALIZAÇÃO POR IP E CHUVA) ---
+  // --- BUSCA DE CLIMA EM TEMPO REAL (OPEN-METEO COM LOCALIZAÇÃO POR IP E CHUVA) ---
   useEffect(() => {
     const buscarClimaTempoReal = async () => {
       try {
         setCarregandoClima(true);
         
-        // 1. Coordenadas padrão de Fortaleza (Fallback)
         let lat = -3.7171;
         let lon = -38.5434;
         let cidadeDetectada = "Fortaleza";
 
         try {
-          // 2. Tenta detectar a localização do usuário via IP
           const respostaIp = await fetch('https://ipinfo.io/json?token=');
           if (respostaIp.ok) {
             const dadosIp = await respostaIp.json();
@@ -113,7 +115,6 @@ const obterDataLocalBR = () => {
           console.warn("Não foi possível detectar o IP, usando Fortaleza como padrão:", ipErr);
         }
 
-        // 3. Busca os dados climáticos incluindo 'precipitation' na URL
         const resposta = await fetch(
           `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&timezone=auto`
         );
@@ -121,9 +122,6 @@ const obterDataLocalBR = () => {
         if (!resposta.ok) throw new Error('Falha ao buscar dados climáticos');
         
         const dados = await resposta.json();
-        
-        // 4. Salva os dados no estado do clima
-        // Agora, o objeto dados.current incluirá a propriedade 'precipitation' (em mm)
         setDadosClima(dados.current);
         setErroClima(false);
         
@@ -136,14 +134,14 @@ const obterDataLocalBR = () => {
     };
 
     buscarClimaTempoReal();
-    
-    // Atualiza automaticamente o clima a cada 15 minutos
     const intervaloClima = setInterval(buscarClimaTempoReal, 900000); 
     return () => clearInterval(intervaloClima);
   }, []);
 
-  // --- TRADUTOR DE CÓDIGO DE CLIMA ---
-  const obterInfoClima = (codigo) => {
+  // --- TRADUTOR DE CÓDIGO DE CLIMA (CORRIGIDO) ---
+  function obterInfoClima(codigo) {
+    if (!codigo && codigo !== 0) return { termo: 'Carregando...', emoji: '☁️' };
+    
     // Códigos WMO (World Meteorological Organization)
     if (codigo === 0) return { termo: 'Céu Limpo', emoji: '☀️' };
     if ([1, 2, 3].includes(codigo)) return { termo: 'Parcialmente Nublado', emoji: '⛅' };
@@ -152,7 +150,7 @@ const obterDataLocalBR = () => {
     if ([80, 81, 82].includes(codigo)) return { termo: 'Pancadas de Chuva', emoji: '🌦️' };
     if ([95, 96, 99].includes(codigo)) return { termo: 'Trovoada / Tempestade', emoji: '⛈️' };
     return { termo: 'Instável', emoji: '☁️' };
-    };
+  }
 
   // --- AUXILIARES DE MÉTRICAS ---
   const metricasDoDia = historicoMetricas[dataSelecionada] || {};
@@ -160,8 +158,16 @@ const obterDataLocalBR = () => {
   const mudarValorMetrica = async (metricaId, mudanca) => {
     const valorAtual = metricasDoDia[metricaId] || 0;
     const novoValor = Math.max(0, valorAtual + mudanca);
-    const novosValoresDoDia = { ...metricasDoDia, [metricaId]: novoValor };
+    atualizarValorMetricaNoSupabase(metricaId, novoValor);
+  };
 
+  const handleInputMetricaManual = (metricaId, valorTexto) => {
+    const novoValor = Math.max(0, parseFloat(valorTexto) || 0);
+    atualizarValorMetricaNoSupabase(metricaId, novoValor);
+  };
+
+  const atualizarValorMetricaNoSupabase = async (metricaId, novoValor) => {
+    const novosValoresDoDia = { ...metricasDoDia, [metricaId]: novoValor };
     setHistoricoMetricas({ ...historicoMetricas, [dataSelecionada]: novosValoresDoDia });
 
     await supabase.from('historico_metricas').upsert({
@@ -188,18 +194,19 @@ const obterDataLocalBR = () => {
 
   const removerMetricaConfig = (id) => setConfigMetricas(configMetricas.filter(m => m.id !== id));
 
-  // --- ✍️ OPERAÇÕES DE TAREFAS (REVISADO) ---
+  // --- ✍️ OPERAÇÕES DE TAREFAS ---
   const handleAdicionarTarefa = async (e) => {
     e.preventDefault();
     if (!novaTarefaTitulo.trim()) return;
 
     const novaTarefaObj = {
       titulo: novaTarefaTitulo,
-      data: dataSelecionada,
+      data: prazoTarefa === 'longo_prazo' ? null : dataSelecionada,
       tipo: tipoTempoTarefa,
       hora_inicio: tipoTempoTarefa === 'horario' ? horaInicio : '',
       hora_fim: tipoTempoTarefa === 'horario' ? horaFim : '',
       prioridade: prioridadeTarefa,
+      prazo: prazoTarefa,
       status: 'pendente',
       user_id: user.id 
     };
@@ -211,6 +218,7 @@ const obterDataLocalBR = () => {
     } else if (data) {
       setTarefas(prev => [...prev, data[0]]);
       setNovaTarefaTitulo('');
+      setPrazoTarefa('diaria');
     }
   };
 
@@ -234,7 +242,7 @@ const obterDataLocalBR = () => {
     await supabase.from('tarefas').delete().eq('id', id);
   };
 
-  // --- ✍️ OPERAÇÕES DE NOTAS (CORRIGIDO) ---
+  // --- ✍️ OPERAÇÕES DE NOTAS ---
   const handleAdicionarNota = async (e) => {
     e.preventDefault();
     if (!novaNota.trim()) return;
@@ -246,7 +254,7 @@ const obterDataLocalBR = () => {
       alert("Erro ao salvar nota: " + error.message);
     } else if (data) {
       setNotas(prev => [...prev, data[0]]);
-      setNovaNota(''); // CORRIGIDO: Agora limpa o estado corretamente
+      setNovaNota(''); 
     }
   };
 
@@ -276,17 +284,13 @@ const obterDataLocalBR = () => {
     return () => clearInterval(intervalo);
   }, [tarefas, permissaoNotificacao, alertasLigados]);
 
-  const solicitarPermissaoNotificacao = () => {
-    if (!('Notification' in window)) return;
-    Notification.requestPermission().then(p => {
-      setPermissaoNotificacao(p);
-      if(p === 'granted') new Notification("🤖 Notificações Ativas!");
-    });
-  };
-
   // --- FILTROS DE RENDERIZAÇÃO ---
   const ordemPrioridade = { alta: 1, media: 2, baixa: 3 };
-  const tarefasDeHoje = tarefas.filter(t => t.data === dataSelecionada).sort((a, b) => (ordemPrioridade[a.prioridade] || 2) - (ordemPrioridade[b.prioridade] || 2));
+  
+  const tarefasDeHoje = tarefas.filter(
+    t => t.data === dataSelecionada && t.prazo !== 'longo_prazo'
+  ).sort((a, b) => (ordemPrioridade[a.prioridade] || 2) - (ordemPrioridade[b.prioridade] || 2));
+
   const tarefasDeHojeComHora = tarefasDeHoje.filter(t => t.tipo === 'horario').sort((a,b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
   const tarefasDeHojeLivres = tarefasDeHoje.filter(t => t.tipo === 'livre');
   
@@ -298,30 +302,22 @@ const obterDataLocalBR = () => {
 
   const horasDoDia = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'];
 
-  const formatarDataExibicao = (dataStr) => {
-    if (!dataStr) return '';
-    const [ano, mes, dia] = dataStr.split('-');
-    const meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-    return `${dia} de ${meses[parseInt(mes) - 1]}, ${ano}`;
+  const obterEstiloPrioridade = (prioridade) => {
+    if (prioridade === 'alta') return 'bg-red-500/10 border-red-500/30 text-red-400 font-bold';
+    if (prioridade === 'media') return 'bg-amber-500/10 border-amber-500/30 text-amber-400';
+    return 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400';
   };
 
-  // --- FUNÇÕES AUXILIARES DE ESTILO DE PRIORIDADE (RESTAURADAS) ---
-const obterEstiloPrioridade = (prioridade) => {
-  if (prioridade === 'alta') return 'bg-red-500/10 border-red-500/30 text-red-400 font-bold';
-  if (prioridade === 'media') return 'bg-amber-500/10 border-amber-500/30 text-amber-400';
-  return 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400';
-};
+  const obterIconePrioridade = (prioridade) => {
+    if (prioridade === 'alta') return '🔥';
+    if (prioridade === 'media') return '⚡';
+    return '🍃';
+  };
 
-const obterIconePrioridade = (prioridade) => {
-  if (prioridade === 'alta') return '🔥';
-  if (prioridade === 'media') return '⚡';
-  return '🍃';
-};
-
-// --- NAVEGAÇÃO DO CALENDÁRIO ---
+  // --- NAVEGAÇÃO DO CALENDÁRIO ---
   const mudarMes = (direcao) => {
     const [ano, mes, dia] = dataSelecionada.split('-').map(Number);
-    const novaData = new Date(ano, mes - 1 + direcao, 1); // Define para o dia 1 do novo mês
+    const novaData = new Date(ano, mes - 1 + direcao, 1); 
     
     const novoAno = novaData.getFullYear();
     const novoMes = String(novaData.getMonth() + 1).padStart(2, '0');
@@ -343,7 +339,6 @@ const obterIconePrioridade = (prioridade) => {
   const gerarDiasDoMes = () => {
     if (!dataSelecionada) return [];
     const [ano, mes] = dataSelecionada.split('-').map(Number);
-    // mes - 1 porque no JavaScript os meses começam em 0 (Janeiro = 0)
     const primeiroDiaSemana = new Date(ano, mes - 1, 1).getDay();
     const totalDiasMes = new Date(ano, mes, 0).getDate();
     
@@ -369,17 +364,15 @@ const obterIconePrioridade = (prioridade) => {
   const estiloTextoPrincipal = tema === 'dark' ? 'text-white' : 'text-zinc-900';
   const estiloTextoSecundario = tema === 'dark' ? 'text-slate-400' : 'text-zinc-500';
 
-return (
+  return (
     <div className={`min-h-screen font-sans relative overflow-x-hidden transition-colors duration-300 ${estiloFundoApp}`}>
       
       {/* BARRA SUPERIOR (HEADER) TOTALMENTE RESPONSIVA */}
       <header className={`border-b p-4 transition-all ${tema === 'dark' ? 'bg-zinc-950 border-zinc-900' : 'bg-white border-slate-200 shadow-sm'}`}>
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           
-          {/* Lado Esquerdo: Logo e Título */}
           <div className="flex items-center justify-between md:justify-start gap-3">
             <div className="flex items-center gap-2.5">
-              {/* Sua logo SVG */}
               <div className="w-7 h-7 text-violet-500">
                 <svg viewBox="0 0 512 512" fill="currentColor">
                   <path d="M256,40 L430,140 L430,340 L256,440 L82,340 L82,140 Z" fill="currentColor" className="text-violet-600"/>
@@ -389,19 +382,13 @@ return (
                 Central do Assistente
               </span>
             </div>
-
-            {/* Identificador visual de data (Apenas no Mobile para equilibrar o espaço) */}
             <div className="text-xs font-medium md:hidden opacity-80 px-2 py-1 rounded-md bg-violet-500/10 text-violet-400">
               Hoje
             </div>
           </div>
 
-          {/* Lado Direito: Bloco Unificado de Ações e Controles */}
           <div className="flex items-center justify-end gap-2 w-full md:w-auto">
-            
-            {/* Grupo de Alternadores (Alerta, Tema) */}
             <div className={`flex items-center gap-1 p-1 rounded-xl ${tema === 'dark' ? 'bg-zinc-900/60' : 'bg-slate-100'}`}>
-              {/* Botão Alerta */}
               <button 
                 type="button" 
                 onClick={() => setAlertasLigados(!alertasLigados)}
@@ -409,8 +396,6 @@ return (
               >
                 {alertasLigados ? '🔔' : '🔕'}
               </button>
-
-              {/* Botão Tema (Claro/Escuro) */}
               <button 
                 type="button" 
                 onClick={() => setTema(tema === 'dark' ? 'light' : 'dark')}
@@ -420,7 +405,6 @@ return (
               </button>
             </div>
 
-            {/* Grupo de Navegação e Sessão (Entrar/Sair) */}
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -429,7 +413,6 @@ return (
               >
                 Painel
               </button>
-
               <button
                 type="button"
                 onClick={onLogout}
@@ -438,7 +421,6 @@ return (
                 Sair
               </button>
             </div>
-
           </div>
         </div>
       </header>
@@ -448,12 +430,9 @@ return (
         
         {/* CALENDÁRIO MENSAL E CLIMA */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-          
-          {/* Card do Calendário */}
           <div className={`border p-5 rounded-2xl lg:col-span-2 ${estiloCard}`}>
             <h3 className={`text-xs font-extrabold uppercase tracking-wider mb-3 ${estiloTextoSecundario}`}>📅 Visão Mensal</h3>
             
-            {/* CABEÇALHO DO CALENDÁRIO COM NAVEGAÇÃO */}
             <div className="flex items-center justify-between mb-4 gap-2">
               <button 
                 type="button"
@@ -494,12 +473,10 @@ return (
               </button>
             </div>
 
-            {/* Dias da semana */}
             <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-500 mb-2">
               <span>DOM</span><span>SEG</span><span>TER</span><span>QUA</span><span>QUI</span><span>SEX</span><span>SÁB</span>
             </div>
 
-            {/* Grade numérica de dias */}
             <div className="grid grid-cols-7 gap-1.5">
               {gerarDiasDoMes().map((dayStr, index) => {
                 if (!dayStr) return <div key={`empty-${index}`} className="opacity-0" />;
@@ -524,7 +501,6 @@ return (
             </div>
           </div>
 
-         {/* CARD DO CLIMA EM TEMPO REAL */}
           <div className={`border p-5 rounded-2xl flex flex-col justify-between transition-all ${estiloCard}`}>
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -547,7 +523,6 @@ return (
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Bloco Principal: Temperatura e Estado Atual */}
                   <div className="flex items-center gap-4 py-2">
                     <span className="text-4xl filter drop-shadow-sm animate-pulse">
                       {obterInfoClima(dadosClima.weather_code).emoji}
@@ -562,7 +537,6 @@ return (
                     </div>
                   </div>
 
-                  {/* Métricas Operacionais Secundárias (Expandido para 3 colunas) */}
                   <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-zinc-800/20 dark:border-zinc-800/60">
                     <div className={`p-2 rounded-xl border text-center ${tema === 'dark' ? 'bg-zinc-900/40 border-zinc-900/60' : 'bg-slate-100 border-slate-200'}`}>
                       <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-tight">Sensação</span>
@@ -594,8 +568,7 @@ return (
               <span className="font-mono">Obs: Atualiza a cada 15m</span>
             </div>
           </div>
-
-        </div> {/* Fecha a div grid do Calendário + Clima */}
+        </div> 
         
         {/* CONTADORES DE MÉTRICAS */}
         <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-6">
@@ -628,7 +601,21 @@ return (
                       {tarefasDeHojeComHora.map(t => (
                         <li key={t.id} className={`p-3 rounded-xl border text-xs flex items-center justify-between ${estiloCardInterno} ${t.status !== 'pendente' ? 'opacity-35 line-through' : ''}`}>
                           <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <button onClick={() => mudarStatusTarefa(t.id, 'concluida')} className="w-4 h-4 rounded-full border border-slate-400 text-[8px] flex items-center justify-center cursor-pointer">{t.status === 'concluida' && '✓'}</button>
+                            <select
+                              value={t.status}
+                              onChange={(e) => mudarStatusTarefa(t.id, e.target.value)}
+                              className={`text-[10px] font-bold p-1 rounded-lg border cursor-pointer focus:outline-none ${
+                                t.status === 'concluida' 
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                                  : t.status === 'andamento'
+                                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse'
+                                  : 'bg-zinc-500/10 text-slate-400 border-zinc-700/30'
+                              }`}
+                            >
+                              <option value="pendente">📥 Pendente</option>
+                              <option value="andamento">⚡ Fazendo</option>
+                              <option value="concluida">✓ Feito</option>
+                            </select>
                             <span className="font-mono text-[10px] bg-violet-500/10 text-violet-500 px-1.5 py-0.5 rounded">{t.hora_inicio} - {t.hora_fim}</span>
                             <span className={`truncate font-medium ${tema === 'light' && t.status === 'pendente' ? 'text-zinc-800' : ''}`}>{t.titulo}</span>
                             <span className={`text-[9px] px-1.5 py-0.5 rounded border ml-1 uppercase font-bold flex-shrink-0 ${obterEstiloPrioridade(t.prioridade)}`}>{obterIconePrioridade(t.prioridade)} {t.prioridade}</span>
@@ -735,28 +722,63 @@ return (
             </div>
           </div>
         )}
+        
+        {/* COMPONENTE DE LONGO PRAZO */}
+        <div className={`border p-5 rounded-2xl mb-6 ${estiloCard}`}>
+          <h2 className="text-sm font-bold text-violet-500 mb-4 uppercase tracking-wider flex items-center justify-between">
+            <span>🚀 Objetivos de Longo Prazo</span>
+            <span className="text-[9px] bg-violet-500/10 px-2 py-0.5 rounded text-violet-400 font-mono font-bold">Sem Data Fixa</span>
+          </h2>
+          
+          {tarefas.filter(t => t.prazo === 'longo_prazo').length === 0 ? (
+            <p className="text-xs text-slate-500 italic py-4 text-center">Nenhum objetivo de longo prazo focado.</p>
+          ) : (
+            <ul className="space-y-2">
+              {tarefas.filter(t => t.prazo === 'longo_prazo').map(t => (
+                <li key={t.id} className={`p-3 rounded-xl border text-xs flex flex-col gap-2 ${estiloCardInterno} ${t.status === 'concluida' ? 'opacity-40 line-through' : ''}`}>
+                  <div className="flex justify-between items-start gap-2">
+                    <span className={`font-medium ${tema === 'light' && t.status === 'pendente' ? 'text-zinc-800' : ''}`}>{t.titulo}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded border uppercase font-bold ${obterEstiloPrioridade(t.prioridade)}`}>{t.prioridade}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1 border-t border-zinc-800/10 dark:border-zinc-800/40">
+                    <select
+                      value={t.status}
+                      onChange={(e) => mudarStatusTarefa(t.id, e.target.value)}
+                      className="text-[10px] bg-transparent border-none font-bold text-violet-400 focus:outline-none cursor-pointer"
+                    >
+                      <option value="pendente">📥 Pendente</option>
+                      <option value="andamento">⚡ Em Andamento</option>
+                      <option value="concluida">✓ Concluída</option>
+                    </select>
+                    <button onClick={() => excluirTarefa(t.id)} className="text-slate-500 hover:text-red-500 text-[11px]">🗑️</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
         {/* GRAFICOS */}
         {dadosGrafico.length > 0 && (
           <div className={`border p-5 rounded-2xl mb-6 ${estiloCard}`}>
             <h3 className="text-xs font-bold mb-4 text-slate-400 uppercase tracking-wider">📈 Análise Histórica de Métricas</h3>
-            <div className="h-56 w-full text-[10px]" style={{ minWidth: 0 }}> {/* Força o cálculo correto do espaço */}
-  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-    <AreaChart data={dadosGrafico} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-      <CartesianGrid strokeDasharray="3 3" stroke={tema === 'dark' ? "#27272a" : "#e2e8f0"} />
-      <XAxis dataKey="dataFormatada" stroke="#71717a" />
-      <YAxis stroke="#71717a" />
-      <Tooltip contentStyle={{ backgroundColor: tema === 'dark' ? '#18181b' : '#ffffff', color: tema === 'dark' ? '#f4f4f5' : '#1e293b' }} />
-      {configMetricas.map(met => (
-        <Area key={met.id} type="monotone" dataKey={met.nome} stroke={met.cor} strokeWidth={2} fillOpacity={0.01} fill={met.cor} />
-      ))}
-    </AreaChart>
-  </ResponsiveContainer>
-</div>
+            <div className="h-56 w-full text-[10px]" style={{ minWidth: 0 }}> 
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                <AreaChart data={dadosGrafico} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={tema === 'dark' ? "#27272a" : "#e2e8f0"} />
+                  <XAxis dataKey="dataFormatada" stroke="#71717a" />
+                  <YAxis stroke="#71717a" />
+                  <Tooltip contentStyle={{ backgroundColor: tema === 'dark' ? '#18181b' : '#ffffff', color: tema === 'dark' ? '#f4f4f5' : '#1e293b' }} />
+                  {configMetricas.map(met => (
+                    <Area key={met.id} type="monotone" dataKey={met.nome} stroke={met.cor} strokeWidth={2} fillOpacity={0.01} fill={met.cor} />
+                  ))}
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         )}
 
-        {/* MURAL */}
+       {/* MURAL */}
         <section className={`border p-5 rounded-2xl ${estiloCard}`}>
           <h2 className="text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider">📌 Mural de Lembretes</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -770,6 +792,15 @@ return (
         </section>
 
       </div> {/* Fecha o Corpo Central do Dashboard */}
+
+      {/* GAVETA LATERAL DE EDIÇÃO (Se houver no seu arquivo abaixo do corpo central, ela continua aqui) */}
+
+      {/* 🚀 O SEU ASSISTENTE FIXO ENTRA EXATAMENTE AQUI, LOGO APÓS O CORPO CENTRAL */}
+      <AssistenteVoz 
+        userId={user.id} 
+        dataSelecionada={dataSelecionada} 
+        onTarefaAdicionada={(novaTarefa) => setTarefas(prev => [...prev, novaTarefa])} 
+      />
 
       {/* GAVETA LATERAL DE EDIÇÃO */}
       <div className={`fixed top-0 right-0 h-full w-[380px] max-w-full border-l shadow-2xl p-6 transform transition-transform duration-300 ease-in-out z-50 flex flex-col justify-between overflow-y-auto ${painelAberto ? 'translate-x-0' : 'translate-x-full'} ${tema === 'dark' ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200'}`}>
@@ -803,16 +834,37 @@ return (
             </div>
           </div>
 
-          {/* Lançamento de Valores */}
+          {/* Lançamento de Valores - AGORA COM INPUT NUMÉRICO DIRETO */}
           <div className={`space-y-2 border-t pt-4 ${tema === 'dark' ? 'border-zinc-800/50' : 'border-slate-200'}`}>
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide">🔢 Lançamento do Dia</h3>
             {configMetricas.map(met => (
               <div key={met.id} className={`flex items-center justify-between p-2 rounded-xl border gap-2 w-full min-w-0 ${tema === 'dark' ? 'bg-zinc-950 border-zinc-800' : 'bg-slate-50 border-slate-200'}`}>
                 <span className={`text-xs truncate flex-1 ${tema === 'dark' ? 'text-slate-300' : 'text-zinc-700'}`}>{met.icone} {met.nome}</span>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button onClick={() => mudarValorMetrica(met.id, -0.5)} className={`px-2 py-0.5 rounded text-xs font-bold cursor-pointer transition-all active:scale-95 ${tema === 'dark' ? 'bg-zinc-800 text-white hover:bg-zinc-700' : 'bg-slate-200 text-zinc-800 hover:bg-slate-300'}`}>-</button>
-                  <span className={`text-xs font-mono font-bold w-12 text-center ${estiloTextoPrincipal}`}>{metricasDoDia[met.id] || 0}h</span>
-                  <button onClick={() => mudarValorMetrica(met.id, 0.5)} className={`px-2 py-0.5 rounded text-xs font-bold cursor-pointer transition-all active:scale-95 ${tema === 'dark' ? 'bg-zinc-800 text-white hover:bg-zinc-700' : 'bg-slate-200 text-zinc-800 hover:bg-slate-300'}`}>+</button>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button 
+                    type="button"
+                    onClick={() => mudarValorMetrica(met.id, -0.5)} 
+                    className={`px-2 py-1 rounded text-xs font-bold cursor-pointer transition-all active:scale-95 ${tema === 'dark' ? 'bg-zinc-800 text-white hover:bg-zinc-700' : 'bg-slate-200 text-zinc-800 hover:bg-slate-300'}`}
+                  >
+                    -
+                  </button>
+                  
+                  <input 
+                    type="number" 
+                    step="0.5"
+                    min="0"
+                    value={metricasDoDia[met.id] ?? 0} 
+                    onChange={(e) => handleInputMetricaManual(met.id, e.target.value)}
+                    className={`w-14 text-center text-xs font-mono font-bold p-1 rounded-md border focus:outline-none focus:border-violet-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${estiloInput}`}
+                  />
+                  
+                  <button 
+                    type="button"
+                    onClick={() => mudarValorMetrica(met.id, 0.5)} 
+                    className={`px-2 py-1 rounded text-xs font-bold cursor-pointer transition-all active:scale-95 ${tema === 'dark' ? 'bg-zinc-800 text-white hover:bg-zinc-700' : 'bg-slate-200 text-zinc-800 hover:bg-slate-300'}`}
+                  >
+                    +
+                  </button>
                 </div>
               </div>
             ))}
@@ -832,17 +884,37 @@ return (
                 </select>
               </div>
 
-              <div className="flex gap-4 p-1">
-                <label className="text-xs flex items-center gap-1.5 cursor-pointer"><input type="radio" checked={tipoTempoTarefa === 'livre'} onChange={() => setTipoTempoTarefa('livre')} className="text-violet-600" /> Todo o dia</label>
-                <label className="text-xs flex items-center gap-1.5 cursor-pointer"><input type="radio" checked={tipoTempoTarefa === 'horario'} onChange={() => setTipoTempoTarefa('horario')} className="text-violet-600" /> Hora marcada</label>
+              <div>
+                <select 
+                  value={prazoTarefa} 
+                  onChange={(e) => setPrazoTarefa(e.target.value)} 
+                  className={`w-full border rounded-lg p-2 text-xs focus:outline-none ${estiloInput}`}
+                >
+                  <option value="diaria">📅 Tarefa do Dia</option>
+                  <option value="longo_prazo">🚀 Meta de Longo Prazo / Backlog</option>
+                </select>
               </div>
 
-              {tipoTempoTarefa === 'horario' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-[10px] text-slate-500 block mb-0.5">Início</label><input type="time" value={horaInicio} onChange={(e) => setHoraInicio(e.target.value)} className={`w-full border rounded-lg p-1.5 text-xs ${estiloInput}`} /></div>
-                  <div><label className="text-[10px] text-slate-500 block mb-0.5">Término</label><input type="time" value={horaFim} onChange={(e) => setHoraFim(e.target.value)} className={`w-full border rounded-lg p-1.5 text-xs ${estiloInput}`} /></div>
-                </div>
+              {prazoTarefa === 'diaria' && (
+                <>
+                  <div className="flex gap-4 p-1">
+                    <label className="text-xs flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" checked={tipoTempoTarefa === 'livre'} onChange={() => setTipoTempoTarefa('livre')} className="text-violet-600" /> Todo o dia
+                    </label>
+                    <label className="text-xs flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" checked={tipoTempoTarefa === 'horario'} onChange={() => setTipoTempoTarefa('horario')} className="text-violet-600" /> Hora marcada
+                    </label>
+                  </div>
+
+                  {tipoTempoTarefa === 'horario' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div><label className="text-[10px] text-slate-500 block mb-0.5">Início</label><input type="time" value={horaInicio} onChange={(e) => setHoraInicio(e.target.value)} className={`w-full border rounded-lg p-1.5 text-xs ${estiloInput}`} /></div>
+                      <div><label className="text-[10px] text-slate-500 block mb-0.5">Término</label><input type="time" value={horaFim} onChange={(e) => setHoraFim(e.target.value)} className={`w-full border rounded-lg p-1.5 text-xs ${estiloInput}`} /></div>
+                    </div>
+                  )}
+                </>
               )}
+
               <button type="submit" className="w-full bg-violet-600 hover:bg-violet-500 text-white font-semibold py-2 rounded-lg text-xs cursor-pointer shadow-sm">Agendar na Nuvem</button>
             </form>
           </div>
@@ -864,4 +936,5 @@ return (
       </div>
 
     </div>
-  );}
+  );
+}
