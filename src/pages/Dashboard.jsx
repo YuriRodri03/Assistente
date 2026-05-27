@@ -795,10 +795,12 @@ export default function Dashboard({ user, onLogout }) {
 
       {/* GAVETA LATERAL DE EDIÇÃO (Se houver no seu arquivo abaixo do corpo central, ela continua aqui) */}
 
-      {/* 🚀 O SEU ASSISTENTE FIXO ENTRA EXATAMENTE AQUI, LOGO APÓS O CORPO CENTRAL */}
+      {/* 🚀 O SEU ASSISTENTE FIXO COM SUPORTE A ALTERAÇÕES DE STATUS E EXCLUSÃO */}
       <AssistenteVoz 
         userId={user.id} 
         dataSelecionada={dataSelecionada} 
+        tarefas={tarefas}
+        setTarefas={setTarefas}
         onTarefaAdicionada={(novaTarefa) => setTarefas(prev => [...prev, novaTarefa])} 
       />
 

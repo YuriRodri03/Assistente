@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 
-export default function AssistenteVoz({ userId, dataSelecionada, onTarefaAdicionada }) {
+export default function AssistenteVoz({ userId, dataSelecionada, onTarefaAdicionada, tarefas, setTarefas }) {
   const [escutando, setEscutando] = useState(false);
 
   const ligarComandoVoz = () => {
@@ -21,9 +21,42 @@ export default function AssistenteVoz({ userId, dataSelecionada, onTarefaAdicion
     recognition.onend = () => setEscutando(false);
 
     recognition.onresult = async (event) => {
-      const textoCapturado = event.results[0][0].transcript.toLowerCase();
+      let textoCapturado = event.results[0][0].transcript.toLowerCase().trim();
       console.log("Texto bruto capturado:", textoCapturado);
 
+      // ==========================================
+      // 1. COMANDOS DE ALTERAÇÃO / EXCLUSÃO DE TAREFAS EXISTENTES
+      // ==========================================
+      
+      // Comando A: Excluir/Deletar tarefa (Ex: "excluir prova de microeconomia")
+      if (textoCapturado.startsWith('excluir ') || textoCapturado.startsWith('deletar ') || textoCapturado.startsWith('apagar ')) {
+        const termoBusca = textoCapturado.replace(/^(excluir|deletar|apagar)\s+/g, '').trim();
+        const tarefaEncontrada = tarefas.find(t => t.titulo.toLowerCase().includes(termoBusca));
+        
+        if (tarefaEncontrada) {
+          setTarefas(prev => prev.filter(t => t.id !== tarefaEncontrada.id));
+          await supabase.from('tarefas').delete().eq('id', tarefaEncontrada.id);
+          console.log(`Tarefa "${tarefaEncontrada.titulo}" excluída por voz.`);
+          return;
+        }
+      }
+
+      // Comando B: Concluir/Finalizar tarefa (Ex: "concluir aula de microeconomia" ou "feito...")
+      if (textoCapturado.startsWith('concluir ') || textoCapturado.startsWith('finalizar ') || textoCapturado.startsWith('marcar como feito ')) {
+        const termoBusca = textoCapturado.replace(/^(concluir|finalizar|marcar como feito)\s+/g, '').trim();
+        const tarefaEncontrada = tarefas.find(t => t.titulo.toLowerCase().includes(termoBusca));
+
+        if (tarefaEncontrada) {
+          setTarefas(prev => prev.map(t => t.id === tarefaEncontrada.id ? { ...t, status: 'concluida' } : t));
+          await supabase.from('tarefas').update({ status: 'concluida' }).eq('id', tarefaEncontrada.id);
+          console.log(`Tarefa "${tarefaEncontrada.titulo}" concluída por voz.`);
+          return;
+        }
+      }
+
+      // ==========================================
+      // 2. PROCESSAMENTO DE CRIAÇÃO DE NOVA TAREFA
+      // ==========================================
       let titulo = textoCapturado;
       let prazo = 'diaria';
       let tipo = 'livre';
@@ -31,43 +64,42 @@ export default function AssistenteVoz({ userId, dataSelecionada, onTarefaAdicion
       let hora_fim = '';
       let dataAlvo = dataSelecionada;
 
-      // ==========================================
-      // 1. DETECTOR DE LONGO PRAZO (BACKLOG)
-      // ==========================================
+      // A. Extração de Longo Prazo
       if (textoCapturado.includes('longo prazo') || textoCapturado.includes('backlog') || textoCapturado.includes('meta')) {
         prazo = 'longo_prazo';
         dataAlvo = null;
-        titulo = titulo.replace(/longo prazo|backlog|meta/g, '');
+        titulo = titulo.replace(/\b(longo prazo|backlog|meta)\b/g, '');
       }
 
-      // ==========================================
-      // 2. PROCESSAMENTO DE DATA (Com limpeza de conectivos grudados)
-      // ==========================================
-      if (textoCapturado.includes('amanhã')) {
-        const hoje = new Date(dataSelecionada + 'T00:00:00');
-        hoje.setDate(hoje.getDate() + 1);
+      // B. Extração de Data Numérica Fixa (Ex: "09/06", "dia 9 do 6", "no dia 25 de 12")
+      const regexDataFixa = /(?:no\s+dia\s+|dia\s+)?(\d{1,2})(?:\/|\s+de\s+|\s+do\s+)(\d{1,2})/i;
+      const matchDataFixa = titulo.match(regexDataFixa);
+
+      if (matchDataFixa && prazo === 'diaria') {
+        const dia = matchDataFixa[1].padStart(2, '0');
+        const mes = matchDataFixa[2].padStart(2, '0');
+        const anoAtual = new Date().getFullYear();
         
-        const ano = hoje.getFullYear();
-        const mes = String(hoje.getMonth() + 1).padStart(2, '0');
-        const dia = String(hoje.getDate()).padStart(2, '0');
-        dataAlvo = `${ano}-${mes}-${dia}`;
-
-        // Limpa "amanhã de", "amanhã as", "amanhã às" ou apenas "amanhã"
-        titulo = titulo.replace(/\bamanhã\s*(?:de|das|as|às|pt)?\b/g, '');
+        dataAlvo = `${anoAtual}-${mes}-${dia}`;
+        titulo = titulo.replace(regexDataFixa, ''); // Remove a menção da data do título
+      } 
+      // C. Extração de Datas Relativas (Amanhã / Hoje)
+      else if (textoCapturado.includes('amanhã')) {
+        const amanhaDate = new Date(dataSelecionada + 'T00:00:00');
+        amanhaDate.setDate(amanhaDate.getDate() + 1);
+        
+        dataAlvo = `${amanhaDate.getFullYear()}-${String(amanhaDate.getMonth() + 1).padStart(2, '0')}-${String(amanhaDate.getDate()).padStart(2, '0')}`;
+        titulo = titulo.replace(/\bamanhã\b/g, '');
       } else if (textoCapturado.includes('hoje')) {
-        titulo = titulo.replace(/\bhoje\s*(?:de|das|as|às)?\b/g, '');
+        titulo = titulo.replace(/\bhoje\b/g, '');
       }
 
-      // ==========================================
-      // 3. DETECTOR DE INTERVALOS E HORÁRIOS
-      // ==========================================
+      // D. Extração de Intervalo de Horários (Ex: "de 10 as 12", "das 14h às 15h30")
       if (prazo === 'diaria') {
-        // Padrão A: Intervalos como "de 10 as 12", "das 14h às 15:30"
-        const regexIntervalo = /(?:\b(?:de|das)\s+)?(\d{1,2})(?:h|:|\s+horas?)?(\d{2})?\s*(?:as|às|ate|até|e)\s*(\d{1,2})(?:h|:|\s+horas?)?(\d{2})?/i;
+        const regexIntervalo = /(?:\b(?:de|das|desde\s+as|desde\s+às)\s+)?(\d{1,2})(?:h|:|\s+horas?)?(\d{2})?\s*(?:as|às|ate|até|e)\s*(\d{1,2})(?:h|:|\s+horas?)?(\d{2})?/i;
         const matchIntervalo = titulo.match(regexIntervalo);
 
-        // Padrão B: Horários únicos como "as 15h", "às 09:30"
-        const regexHoraUnica = /\b(?:as|às)\s+(\d{1,2})(?:h|:|\s+horas?)?(\d{2})?/i;
+        const regexHoraUnica = /\b(?:as|às|atrais|a|à)\s+(\d{1,2})(?:h|:|\s+horas?)?(\d{2})?/i;
         const matchHoraUnica = titulo.match(regexHoraUnica);
 
         if (matchIntervalo) {
@@ -95,19 +127,15 @@ export default function AssistenteVoz({ userId, dataSelecionada, onTarefaAdicion
       }
 
       // ==========================================
-      // 4. FAXINA RIGOROSA DE SOBRAS NO TÍTULO
+      // 3. LIMPEZA SEMÂNTICA FINAL DO TÍTULO
       // ==========================================
       titulo = titulo
-        // Remove verbos de comando operacionais no início da frase
-        .replace(/^(agendar|adicionar|criar|tarefa|colocar|por|lembrar|de|para|tenho)\b/g, '')
-        // Remove conectivos e preposições que ficaram perdidos no meio ou fim do texto
-        .replace(/\b(de|da|do|em|para|as|às|das|dos|com)\s*$/, '')
-        .replace(/^\s*(de|da|do|em|para|as|às|das|dos|com)\b/g, '')
-        // Remove espaços múltiplos gerados pelos cortes
+        .replace(/^(agendar|adicionar|criar|tarefa|colocar|por|lembrar|de|para|tenho|uma|um)\b/g, '')
+        .replace(/\b(de|da|do|em|para|as|às|das|dos|com|no|na|no\s+dia|na\s+data)\s*$/, '')
+        .replace(/^\s*(de|da|do|em|para|as|às|das|dos|com|no|na)/g, '')
         .replace(/\s+/g, ' ') 
         .trim();
 
-      // Capitaliza a primeira letra do título limpo
       titulo = titulo.charAt(0).toUpperCase() + titulo.slice(1);
 
       if (!titulo) return;
@@ -152,7 +180,7 @@ export default function AssistenteVoz({ userId, dataSelecionada, onTarefaAdicion
           ? 'bg-red-500 text-white border-red-600 animate-pulse ring-4 ring-red-500/30' 
           : 'bg-violet-600 hover:bg-violet-500 text-white border-violet-500 shadow-violet-600/20'
       }`}
-      title="Ex: 'Aula de microeconomia amanhã de 10 as 12' ou 'Estudar para a prova de longo prazo'"
+      title="Ex: 'Prova de microeconomia no dia 09/06 de 10 as 12' ou 'Concluir prova...'"
     >
       <span className={escutando ? 'animate-bounce' : ''}>🎙️</span>
       <span className="text-xs tracking-wide">{escutando ? 'Ouvindo...' : 'Comando de Voz'}</span>
